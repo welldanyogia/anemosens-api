@@ -117,6 +117,14 @@ def predict():
         return jsonify({"error": f"Prediction failed: {e}"}), 500
 
 
+# ─── Health-check route ───────────────────────────────────────────────────────
+@app.route('/health', methods=['GET'])
+def health_check():
+    """
+    Health-check endpoint to verify the application is running.
+    """
+    return jsonify({"status": "ok"}), 200
+
 # ─── Entrypoint ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     # Run with debug=False and use_reloader=False to avoid multiple processes in notebooks
