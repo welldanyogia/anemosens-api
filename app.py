@@ -166,8 +166,12 @@ def predict():
 
             gender = data.get('gender', 'M').strip().upper()
 
-        # encode gender
-        gender_code = 1 if gender == 'F' else 0
+        # Encode gender - handle both formats:
+        # "M"/"F" (standard) or "0"/"1" (legacy mobile app)
+        if gender in ['F', '1', '1.0']:
+            gender_code = 1  # Female
+        else:
+            gender_code = 0  # Male (default for "M", "0", "0.0", or any other value)
 
         # preprocessing
         img_batch  = prep_image_for_flask(img_bytes)
@@ -200,6 +204,61 @@ def health_check():
     Health-check endpoint to verify the application is running.
     """
     return jsonify({"status": "ok"}), 200
+
+
+# ─── API Documentation routes ─────────────────────────────────────────────────
+@app.route('/docs', methods=['GET'])
+def swagger_ui():
+    """
+    Serve Swagger UI for API documentation.
+    """
+    return '''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>AneMoSense API Documentation</title>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+        <style>
+            body { margin: 0; padding: 0; }
+            .swagger-ui .topbar { display: none; }
+        </style>
+    </head>
+    <body>
+        <div id="swagger-ui"></div>
+        <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+        <script>
+            window.onload = function() {
+                SwaggerUIBundle({
+                    url: "/openapi.yaml",
+                    dom_id: '#swagger-ui',
+                    presets: [
+                        SwaggerUIBundle.presets.apis,
+                        SwaggerUIBundle.SwaggerUIStandalonePreset
+                    ],
+                    layout: "BaseLayout",
+                    deepLinking: true,
+                    showExtensions: true,
+                    showCommonExtensions: true
+                });
+            };
+        </script>
+    </body>
+    </html>
+    ''', 200, {'Content-Type': 'text/html'}
+
+
+@app.route('/openapi.yaml', methods=['GET'])
+def openapi_spec():
+    """
+    Serve OpenAPI specification file.
+    """
+    try:
+        with open('openapi.yaml', 'r', encoding='utf-8') as f:
+            return f.read(), 200, {'Content-Type': 'text/yaml'}
+    except FileNotFoundError:
+        return jsonify({"error": "OpenAPI spec not found"}), 404
 
 # ─── Entrypoint ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":

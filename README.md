@@ -85,6 +85,20 @@ except Exception as e:
 
 ---
 
+## API Documentation
+
+### Interactive Swagger UI
+Dokumentasi API interaktif tersedia di:
+- **Local**: http://localhost:5000/docs
+- **Production**: https://api.anemosense.webranastore.com/docs
+
+### OpenAPI Specification
+File OpenAPI 3.0 spec tersedia di:
+- **Local**: http://localhost:5000/openapi.yaml
+- **File**: `openapi.yaml`
+
+---
+
 ## API Endpoints
 
 ### 1. Predict Anemia
@@ -143,6 +157,17 @@ Returns API status for monitoring.
   "status": "ok"
 }
 ```
+
+---
+
+### 3. API Documentation
+**GET** `/docs`
+
+Interactive Swagger UI untuk menjelajahi dan menguji API.
+
+**GET** `/openapi.yaml`
+
+OpenAPI 3.0 specification file dalam format YAML.
 
 ---
 
@@ -357,10 +382,11 @@ All versions are pinned for reproducibility (Sprint 1 update).
 
 ---
 
-**Last Updated**: Sprint 2 - Stability & Resilience Complete
-**API Version**: 1.1.0
+**Last Updated**: Sprint 3 - Refactoring & Production Readiness
+**API Version**: 1.2.0
 **Production URL**: https://anemosense.webranastore.com
 
 **Sprint History**:
 - Sprint 1: Security Hardening (CORS, environment config)
 - Sprint 2: Stability & Resilience (Input validation, error handling)
+- Sprint 3: Refactoring & Production Readiness (Gunicorn workers, API docs, gender encoding fix)
