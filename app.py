@@ -25,15 +25,21 @@ except ImportError:
 import logging
 import os
 import base64
+import re
 
 import numpy as np
 import cv2
 import tensorflow as tf
 
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from tensorflow.keras.applications.efficientnet import preprocess_input
+from dotenv import load_dotenv
 
 # ─── Configuration ──────────────────────────────────────────────────────────────
+# Load environment variables from .env file
+load_dotenv()
+
 # Silence all logs below ERROR level
 logging.getLogger().setLevel(logging.ERROR)
 
@@ -49,6 +55,43 @@ model = tf.keras.models.load_model(MODEL_PATH, compile=False);
 
 # ─── Flask app setup ───────────────────────────────────────────────────────────
 app = Flask(__name__)
+
+# ─── CORS Configuration ─────────────────────────────────────────────────────────
+# Allow requests from localhost (development) and production domain
+# Regex pattern allows localhost with any port number (e.g., :3000, :5000, :8080)
+CORS(app,
+     origins=[
+         re.compile(r"^http://localhost(:\d+)?$"),  # Match localhost with optional port
+         "https://anemosense.webranastore.com"
+     ],
+     supports_credentials=True)
+
+def validate_age(age_value) -> tuple:
+    """
+    Validate age input is a valid number between 0 and 120.
+    Returns (age_float, error_message).
+    """
+    try:
+        age = float(age_value)
+        if age < 0 or age > 120:
+            return None, "Invalid age"
+        return age, None
+    except (ValueError, TypeError):
+        return None, "Invalid age"
+
+
+def validate_file_size(file_obj, max_size_mb=5) -> bool:
+    """
+    Check if file size is within the allowed limit.
+    Uses seek/tell to check size without loading entire file into memory.
+    """
+    file_obj.seek(0, os.SEEK_END)
+    size_bytes = file_obj.tell()
+    file_obj.seek(0)  # Reset to beginning
+
+    max_bytes = max_size_mb * 1024 * 1024
+    return size_bytes <= max_bytes
+
 
 def prep_image_for_flask(img_data: bytes, img_size=IMG_SIZE) -> np.ndarray:
     """
@@ -77,10 +120,26 @@ def predict():
             if not img_file:
                 return jsonify({"error": "No image file provided"}), 400
 
+            # Validate filename
+            if not img_file.filename or img_file.filename.strip() == '':
+                return jsonify({"error": "Invalid filename"}), 400
+
+            # Validate MIME type
+            if not img_file.mimetype or not img_file.mimetype.startswith('image/'):
+                return jsonify({"error": "Invalid file type"}), 400
+
+            # Validate file size (max 5MB)
+            if not validate_file_size(img_file, max_size_mb=5):
+                return jsonify({"error": "File too large"}), 413
+
             img_bytes = img_file.read()
 
-            # metadata dari form-data
-            age = float(request.form.get('age', 0))
+            # Validate age
+            age_str = request.form.get('age', '0')
+            age, error = validate_age(age_str)
+            if error:
+                return jsonify({"error": error}), 400
+
             gender = request.form.get('gender', 'M').strip().upper()
         # —————— CASE 2: application/json ——————
         else:
@@ -90,8 +149,21 @@ def predict():
             img_b64 = data.get('image')
             if not img_b64:
                 return jsonify({"error": "No image data provided"}), 400
+
+            # Decode base64 image
             img_bytes = base64.b64decode(img_b64)
-            age = float(data.get('age', 0))
+
+            # Validate decoded image size (max 5MB)
+            max_bytes = 5 * 1024 * 1024
+            if len(img_bytes) > max_bytes:
+                return jsonify({"error": "File too large"}), 413
+
+            # Validate age
+            age_str = data.get('age', '0')
+            age, error = validate_age(age_str)
+            if error:
+                return jsonify({"error": error}), 400
+
             gender = data.get('gender', 'M').strip().upper()
 
         # encode gender

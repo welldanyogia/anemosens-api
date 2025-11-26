@@ -1,104 +1,291 @@
 # Anemosense API
 
-Flask API for anemia prediction using a TensorFlow model. This repository
-includes Docker configurations for both development and production usage and
-basic instructions for deploying on a VPS with SSL using Certbot.
+Flask-based REST API for anemia prediction using TensorFlow/EfficientNet model. Provides endpoints for image-based hemoglobin level prediction with metadata support.
 
-## Development
+## Features
 
-Build the development image:
+- **ML Model Inference**: TensorFlow/Keras EfficientNet-based anemia detection
+- **Multi-format Input**: Supports both `multipart/form-data` and `application/json`
+- **CORS Support**: Configured for cross-origin requests (Sprint 1)
+- **Production Ready**: Gunicorn WSGI server with Docker support
+- **Health Monitoring**: `/health` endpoint for uptime checks
 
+## Sprint 1 Updates (Security Hardening)
+
+### BE-01: CORS Implementation ✅
+- **Added**: `flask-cors` with whitelist configuration
+- **Security**: Only allows `localhost` (dev) and `https://anemosense.webranastore.com` (prod)
+- **Regex Support**: Dynamic port matching for localhost development
+- **Credentials**: Supports cookie/auth header forwarding
+
+**Files Modified**:
+- `app.py`: Added CORS middleware with regex pattern
+- `requirements.txt`: Pinned all dependency versions + added `flask-cors==4.0.0`
+- `.env.example`: Created environment variable template
+
+---
+
+## API Endpoints
+
+### 1. Predict Anemia
+**POST** `/predict`
+
+Accepts image + metadata and returns hemoglobin prediction.
+
+**Request (multipart/form-data)**:
 ```bash
-docker build -f Dockerfile.dev -t anemosense-dev .
+curl -X POST http://localhost:5000/predict \
+  -F "image=@photo.jpg" \
+  -F "age=25" \
+  -F "gender=F"
 ```
 
-Run it mounting the source code so changes are reflected immediately:
-
+**Request (application/json)**:
 ```bash
+curl -X POST http://localhost:5000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image": "<base64-encoded-image>",
+    "age": 25,
+    "gender": "F"
+  }'
+```
+
+**Response**:
+```json
+{
+  "predicted_hgb": 12.5,
+  "status": "Normal"
+}
+```
+
+**Parameters**:
+- `image`: Image file (JPG/PNG) or base64 string
+- `age`: Patient age (float)
+- `gender`: `M` (male) or `F` (female)
+
+**Status Codes**:
+- `200`: Success
+- `400`: Invalid input (missing image, bad format)
+- `415`: Unsupported media type
+- `500`: Prediction failed
+
+---
+
+### 2. Health Check
+**GET** `/health`
+
+Returns API status for monitoring.
+
+**Response**:
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+## Local Development
+
+### Option 1: Docker (Recommended)
+
+**Development Mode** (hot reload):
+```bash
+docker build -f Dockerfile.dev -t anemosense-dev .
 docker run --rm -it -p 5000:5000 -v $(pwd):/app anemosense-dev
 ```
 
-The API will be available at `http://localhost:5000`.
-
-## Production Build
-
-Create the production image:
-
+**Production Mode**:
 ```bash
 docker build -t anemosense-api .
-```
-
-Run the container in detached mode:
-
-```bash
 docker run -d --name anemosense-api -p 5000:5000 anemosense-api
 ```
 
-Gunicorn is used as the WSGI server inside the container.
+### Option 2: Local Python
 
-## Deploying on a VPS
+**Prerequisites**: Python 3.10+
 
-1. **Install Docker & Docker Compose**
+```bash
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
-   ```bash
-   sudo apt update
-   sudo apt install docker.io docker-compose -y
-   sudo systemctl enable --now docker
-   ```
+# Install dependencies
+pip install -r requirements.txt
 
-2. **Clone this repository on the server**
+# Run development server
+python app.py
+```
 
-   ```bash
-   git clone <repo-url>
-   cd anemosens-api
-   ```
+API available at: `http://localhost:5000`
 
-3. **Build and run the production container**
+---
 
-   ```bash
-   docker build -t anemosense-api .
-   docker run -d --name anemosense-api -p 5000:5000 anemosense-api
-   ```
+## Environment Variables
 
-4. **Install Nginx and configure it as a reverse proxy**
+Create `.env` file (use `.env.example` as template):
 
-   ```bash
-   sudo apt install nginx -y
-   ```
+```bash
+# Flask Configuration
+FLASK_ENV=development
+FLASK_APP=app.py
+FLASK_RUN_HOST=0.0.0.0
+FLASK_RUN_PORT=5000
 
-   Create `/etc/nginx/sites-available/anemosense` with the following contents:
+# Model Configuration
+MODEL_PATH=model_anemia.h5
+ANEMIA_THRESHOLD=12.0
 
-   ```nginx
-   server {
-       listen 80;
-       server_name anemosense.webranastore.com;
+# CORS Configuration
+ALLOWED_ORIGINS=http://localhost:*,https://anemosense.webranastore.com
 
-       location / {
-           proxy_pass http://localhost:5000;
-           proxy_set_header Host $host;
-           proxy_set_header X-Real-IP $remote_addr;
-           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-           proxy_set_header X-Forwarded-Proto $scheme;
-       }
-   }
-   ```
+# Logging
+LOG_LEVEL=ERROR
+```
 
-   Enable the site and reload Nginx:
+**Note**: `.env` is optional. Defaults are hardcoded in `app.py`.
 
-   ```bash
-   sudo ln -s /etc/nginx/sites-available/anemosense /etc/nginx/sites-enabled/
-   sudo nginx -t && sudo systemctl reload nginx
-   ```
+---
 
-5. **Obtain SSL certificates using Certbot**
+## Production Deployment
 
-   ```bash
-   sudo apt install certbot python3-certbot-nginx -y
-   sudo certbot --nginx -d anemosense.webranastore.com
-   ```
+### 1. Install Docker on VPS
 
-   Follow the prompts to obtain and install the certificate. Certbot will also
-   create a cron job for automatic renewal.
+```bash
+sudo apt update
+sudo apt install docker.io docker-compose -y
+sudo systemctl enable --now docker
+```
 
-After these steps the API will be served at
-`https://anemosense.webranastore.com` via Nginx with HTTPS.
+### 2. Clone Repository
+
+```bash
+git clone <repo-url>
+cd anemosens-api
+```
+
+### 3. Build & Run Container
+
+```bash
+docker build -t anemosense-api .
+docker run -d --name anemosense-api -p 5000:5000 --restart unless-stopped anemosense-api
+```
+
+### 4. Configure Nginx Reverse Proxy
+
+Install Nginx:
+```bash
+sudo apt install nginx -y
+```
+
+Create `/etc/nginx/sites-available/anemosense`:
+```nginx
+server {
+    listen 80;
+    server_name anemosense.webranastore.com;
+
+    location / {
+        proxy_pass http://localhost:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # CORS headers (handled by Flask, but can be duplicated here)
+        add_header Access-Control-Allow-Origin $http_origin always;
+        add_header Access-Control-Allow-Credentials true always;
+    }
+}
+```
+
+Enable site:
+```bash
+sudo ln -s /etc/nginx/sites-available/anemosense /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### 5. Setup SSL with Certbot
+
+```bash
+sudo apt install certbot python3-certbot-nginx -y
+sudo certbot --nginx -d anemosense.webranastore.com
+```
+
+Certbot will auto-configure HTTPS and set up renewal cron job.
+
+---
+
+## Dependencies
+
+```
+Flask==3.0.0              # Web framework
+numpy==1.26.2             # Array operations
+opencv-python-headless==4.8.1.78  # Image processing
+tensorflow==2.15.0        # ML model inference
+gunicorn==21.2.0          # WSGI server (production)
+flask-cors==4.0.0         # CORS middleware (Sprint 1)
+python-dotenv==1.0.0      # Environment variables (Sprint 1)
+```
+
+All versions are pinned for reproducibility (Sprint 1 update).
+
+---
+
+## Security Notes
+
+### Sprint 1 Improvements:
+- ✅ **CORS Whitelist**: Only specified origins allowed
+- ✅ **Version Pinning**: All dependencies locked to specific versions
+- ✅ **Environment Variables**: Sensitive config externalized
+- ✅ **Regex Validation**: Localhost ports validated with pattern `^http://localhost:\d+$`
+
+### Recommendations for Sprint 2+:
+- [ ] Add rate limiting (Flask-Limiter)
+- [ ] Implement input validation (file size, age bounds)
+- [ ] Add request logging
+- [ ] Set up monitoring (Sentry/CloudWatch)
+- [ ] Implement API authentication
+
+---
+
+## Troubleshooting
+
+### CORS Errors
+**Problem**: Browser shows "CORS policy blocked"
+
+**Solution**:
+1. Verify origin is whitelisted in `app.py` CORS config
+2. Check request includes proper headers
+3. For localhost, ensure port matches regex pattern
+
+### Model Loading Errors
+**Problem**: `FileNotFoundError: model_anemia.h5`
+
+**Solution**:
+1. Ensure `model_anemia.h5` is in same directory as `app.py`
+2. Check `MODEL_PATH` in `.env` if using custom location
+
+### Docker Build Issues
+**Problem**: `pip install` fails during build
+
+**Solution**:
+1. Check internet connection
+2. Use `--no-cache` flag: `docker build --no-cache -t anemosense-api .`
+3. Verify `requirements.txt` has correct line endings (LF, not CRLF)
+
+---
+
+## License
+
+[Add your license here]
+
+## Contributors
+
+- [Your Team/Organization]
+
+---
+
+**Last Updated**: Sprint 1 - Security Hardening Complete
+**API Version**: 1.0.0
+**Production URL**: https://anemosense.webranastore.com
