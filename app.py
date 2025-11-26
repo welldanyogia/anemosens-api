@@ -184,9 +184,13 @@ def predict():
         })
 
     except ValueError as ve:
+        # Validation errors are safe to expose
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
-        return jsonify({"error": f"Prediction failed: {e}"}), 500
+        # Log the full error for internal debugging
+        print(f"INTERNAL ERROR: {e}")
+        # Return generic message to prevent information disclosure
+        return jsonify({"error": "Terjadi kesalahan sistem saat memproses gambar"}), 500
 
 
 # ─── Health-check route ───────────────────────────────────────────────────────
