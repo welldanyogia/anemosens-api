@@ -1,0 +1,317 @@
+openapi: 3.0.3
+info:
+  title: AneMoSense API
+  description: |
+    # AneMoSense - Anemia Detection API
+    
+    REST API untuk deteksi anemia berdasarkan gambar mata menggunakan model Machine Learning (EfficientNet).
+    
+    ## Fitur Utama
+    - Prediksi kadar Hemoglobin (Hgb) dari foto mata
+    - Deteksi status anemia (Normal/Anemia)
+    - Support upload via multipart/form-data atau JSON base64
+    
+    ## Model Information
+    - **Architecture**: EfficientNet-based CNN
+    - **Input**: Gambar mata (224x224 RGB)
+    - **Output**: Prediksi kadar Hemoglobin (g/dL)
+    - **Threshold**: < 12.0 g/dL = Anemia
+    
+    ## Authentication
+    Saat ini API tidak memerlukan authentication. CORS dikonfigurasi untuk:
+    - `http://localhost:*` (development)
+    - `https://anemosense.webranastore.com` (production)
+    
+  version: 1.0.0
+  contact:
+    name: AneMoSense Team
+    email: support@anemosense.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:5000
+    description: Local Development Server
+  - url: https://api.anemosense.webranastore.com
+    description: Production Server
+
+tags:
+  - name: Prediction
+    description: Endpoint untuk prediksi anemia
+  - name: Health
+    description: Endpoint untuk monitoring kesehatan server
+
+paths:
+  /predict:
+    post:
+      tags:
+        - Prediction
+      summary: Prediksi Anemia dari Gambar Mata
+      description: |
+        Menganalisis gambar mata untuk memprediksi kadar hemoglobin dan status anemia.
+        
+        **Mendukung 2 format request:**
+        1. `multipart/form-data` - Upload file gambar langsung
+        2. `application/json` - Kirim gambar dalam format base64
+        
+        **Gender Encoding:**
+        - `M` atau `0` = Laki-laki
+        - `F` atau `1` = Perempuan
+        
+        **Batasan:**
+        - Ukuran file maksimal: 5MB
+        - Format gambar: JPEG, PNG
+        - Resolusi minimum: 224x224 pixels
+        
+      operationId: predictAnemia
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PredictRequestMultipart'
+            examples:
+              malePatient:
+                summary: Pasien Laki-laki 25 tahun
+                value:
+                  image: (binary file)
+                  gender: M
+                  age: 25
+              femalePatient:
+                summary: Pasien Perempuan 30 tahun
+                value:
+                  image: (binary file)
+                  gender: F
+                  age: 30
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PredictRequestJSON'
+            examples:
+              jsonRequest:
+                summary: Request dengan Base64 image
+                value:
+                  image: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBD..."
+                  gender: "M"
+                  age: 25
+      responses:
+        '200':
+          description: Prediksi berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictResponse'
+              examples:
+                normalResult:
+                  summary: Hasil Normal
+                  value:
+                    predicted_hgb: 14.5
+                    status: "Normal"
+                anemiaResult:
+                  summary: Hasil Anemia
+                  value:
+                    predicted_hgb: 10.2
+                    status: "Anemia"
+        '400':
+          description: Bad Request - Input tidak valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                noImage:
+                  summary: Tidak ada gambar
+                  value:
+                    error: "No image file provided"
+                invalidFilename:
+                  summary: Filename tidak valid
+                  value:
+                    error: "Invalid filename"
+                invalidFileType:
+                  summary: Tipe file tidak valid
+                  value:
+                    error: "Invalid file type"
+                invalidAge:
+                  summary: Usia tidak valid
+                  value:
+                    error: "Invalid age"
+                decodeError:
+                  summary: Gagal decode gambar
+                  value:
+                    error: "Failed to decode image bytes."
+        '413':
+          description: Payload Too Large - File melebihi 5MB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "File too large"
+        '415':
+          description: Unsupported Media Type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Request must be JSON or multipart/form-data"
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Terjadi kesalahan sistem saat memproses gambar"
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health Check
+      description: |
+        Endpoint untuk memeriksa status kesehatan server.
+        Dapat digunakan untuk:
+        - Load balancer health checks
+        - Kubernetes liveness/readiness probes
+        - Monitoring uptime
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Server berjalan normal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "ok"
+
+components:
+  schemas:
+    PredictRequestMultipart:
+      type: object
+      required:
+        - image
+      properties:
+        image:
+          type: string
+          format: binary
+          description: |
+            File gambar mata.
+            - Format: JPEG atau PNG
+            - Ukuran maksimal: 5MB
+            - Resolusi disarankan: minimal 224x224 pixels
+        gender:
+          type: string
+          description: |
+            Jenis kelamin pasien.
+            - `M` atau `0` = Laki-laki
+            - `F` atau `1` = Perempuan
+          enum: [M, F, '0', '1']
+          default: M
+          example: M
+        age:
+          type: string
+          description: |
+            Usia pasien dalam tahun.
+            - Range valid: 0-120
+            - Default: 0
+          pattern: '^\d+(\.\d+)?$'
+          default: '0'
+          example: '25'
+
+    PredictRequestJSON:
+      type: object
+      required:
+        - image
+      properties:
+        image:
+          type: string
+          format: byte
+          description: |
+            Gambar mata dalam format Base64.
+            - Ukuran maksimal setelah decode: 5MB
+          example: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYE..."
+        gender:
+          type: string
+          description: |
+            Jenis kelamin pasien.
+            - `M` atau `0` = Laki-laki  
+            - `F` atau `1` = Perempuan
+          enum: [M, F, '0', '1']
+          default: M
+          example: M
+        age:
+          oneOf:
+            - type: string
+            - type: number
+          description: |
+            Usia pasien dalam tahun.
+            - Range valid: 0-120
+            - Default: 0
+          default: 0
+          example: 25
+
+    PredictResponse:
+      type: object
+      required:
+        - predicted_hgb
+        - status
+      properties:
+        predicted_hgb:
+          type: number
+          format: float
+          description: |
+            Prediksi kadar Hemoglobin dalam g/dL.
+            
+            **Rentang Normal (WHO):**
+            - Laki-laki dewasa: 13.0 - 17.5 g/dL
+            - Perempuan dewasa: 12.0 - 15.5 g/dL
+          example: 14.5
+          minimum: 0
+          maximum: 25
+        status:
+          type: string
+          description: |
+            Status anemia berdasarkan threshold 12.0 g/dL.
+            - `Normal`: Hgb >= 12.0 g/dL
+            - `Anemia`: Hgb < 12.0 g/dL
+          enum: [Normal, Anemia]
+          example: Normal
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          description: Status kesehatan server
+          enum: [ok]
+          example: ok
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Pesan error yang menjelaskan masalah
+          example: "No image file provided"
+
+  examples:
+    NormalPrediction:
+      summary: Prediksi Normal
+      description: Contoh response untuk pasien dengan kadar Hgb normal
+      value:
+        predicted_hgb: 14.5
+        status: Normal
+
+    AnemiaPrediction:
+      summary: Prediksi Anemia
+      description: Contoh response untuk pasien dengan anemia
+      value:
+        predicted_hgb: 10.2
+        status: Anemia
+
