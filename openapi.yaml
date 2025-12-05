@@ -2,30 +2,28 @@ openapi: 3.0.3
 info:
   title: AneMoSense API
   description: |
-    # AneMoSense - Anemia Detection API
+    # AneMoSense - Dual-Model Anemia Detection API
     
-    REST API untuk deteksi anemia berdasarkan gambar mata menggunakan model Machine Learning (EfficientNet).
+    REST API untuk deteksi anemia berdasarkan gambar mata menggunakan **Dual-Model Architecture**.
     
     ## Fitur Utama
+    - **Dual-Model Prediction**: V1 (Lightweight) + V2 (Accurate)
     - Prediksi kadar Hemoglobin (Hgb) dari foto mata
-    - Deteksi status anemia (Normal/Anemia)
+    - Deteksi status anemia dengan severity level
     - Support upload via multipart/form-data atau JSON base64
     
-    ## Model Information
-    - **Architecture**: EfficientNet-based CNN
-    - **Input**: Gambar mata (224x224 RGB)
-    - **Output**: Prediksi kadar Hemoglobin (g/dL)
-    - **Threshold**: < 12.0 g/dL = Anemia
+    ## Model Architecture
     
-    ## Authentication
-    Saat ini API tidak memerlukan authentication. CORS dikonfigurasi untuk:
-    - `http://localhost:*` (development)
-    - `https://anemosense.webranastore.com` (production)
+    | Model | Size | Description | Preprocessing |
+    |-------|------|-------------|---------------|
+    | **V1 (Lightweight)** | 11 MB | Faster inference, good for screening | MobileNetV2-style |
+    | **V2 (Accurate)** | 49 MB | Higher accuracy, recommended for diagnosis | EfficientNet-style |
     
-  version: 1.0.0
-  contact:
-    name: AneMoSense Team
-    email: support@anemosense.com
+    ## Input Requirements
+    - **Image**: 224x224 RGB (auto-resized)
+    - **Metadata**: gender_code (0=Male, 1=Female), age
+    
+    ## Threshold (WHO Standards)
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
@@ -38,7 +36,11 @@ servers:
 
 tags:
   - name: Prediction
-    description: Endpoint untuk prediksi anemia
+    description: Endpoint untuk prediksi anemia (dual-model)
+  - name: Single Model
+    description: Endpoint untuk prediksi dengan model spesifik
+  - name: Info
+    description: Informasi server dan model
   - name: Health
     description: Endpoint untuk monitoring kesehatan server
 
@@ -47,9 +49,14 @@ paths:
     post:
       tags:
         - Prediction
-      summary: Prediksi Anemia dari Gambar Mata
+      summary: Dual-Model Prediction
       description: |
-        Menganalisis gambar mata untuk memprediksi kadar hemoglobin dan status anemia.
+        Menganalisis gambar mata menggunakan **kedua model (V1 & V2)** dan mengembalikan hasil gabungan.
+        
+        **Response mencakup:**
+        - Hasil V1 (Lightweight)
+        - Hasil V2 (Accurate)
+        - Hasil Combined (Weighted: 30% V1 + 70% V2)
         
         **Mendukung 2 format request:**
         1. `multipart/form-data` - Upload file gambar langsung
@@ -62,107 +69,200 @@ paths:
         **Batasan:**
         - Ukuran file maksimal: 5MB
         - Format gambar: JPEG, PNG
-        - Resolusi minimum: 224x224 pixels
         
-      operationId: predictAnemia
+      operationId: predictDual
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/PredictRequestMultipart'
-            examples:
-              malePatient:
-                summary: Pasien Laki-laki 25 tahun
-                value:
-                  image: (binary file)
-                  gender: M
-                  age: 25
-              femalePatient:
-                summary: Pasien Perempuan 30 tahun
-                value:
-                  image: (binary file)
-                  gender: F
-                  age: 30
           application/json:
             schema:
               $ref: '#/components/schemas/PredictRequestJSON'
-            examples:
-              jsonRequest:
-                summary: Request dengan Base64 image
-                value:
-                  image: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBD..."
-                  gender: "M"
-                  age: 25
       responses:
         '200':
           description: Prediksi berhasil
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PredictResponse'
+                $ref: '#/components/schemas/DualPredictResponse'
               examples:
                 normalResult:
                   summary: Hasil Normal
                   value:
+                    meta:
+                      timestamp: "2025-11-26T10:30:00.000Z"
+                      input:
+                        gender: "Male"
+                        gender_code: 0
+                        age: 25
                     predicted_hgb: 14.5
                     status: "Normal"
+                    predictions:
+                      v1:
+                        hgb: 14.2
+                        status: "Normal"
+                        severity: "normal"
+                        is_anemia: false
+                      v2:
+                        hgb: 14.6
+                        status: "Normal"
+                        severity: "normal"
+                        is_anemia: false
+                      combined:
+                        hgb: 14.5
+                        status: "Normal"
+                        severity: "normal"
+                        is_anemia: false
+                        weights:
+                          v1: 0.3
+                          v2: 0.7
                 anemiaResult:
                   summary: Hasil Anemia
                   value:
+                    meta:
+                      timestamp: "2025-11-26T10:30:00.000Z"
+                      input:
+                        gender: "Female"
+                        gender_code: 1
+                        age: 30
                     predicted_hgb: 10.2
                     status: "Anemia"
+                    predictions:
+                      v1:
+                        hgb: 10.5
+                        status: "Anemia"
+                        severity: "mild"
+                        is_anemia: true
+                      v2:
+                        hgb: 10.1
+                        status: "Anemia"
+                        severity: "moderate"
+                        is_anemia: true
+                      combined:
+                        hgb: 10.2
+                        status: "Anemia"
+                        severity: "mild"
+                        is_anemia: true
+                        weights:
+                          v1: 0.3
+                          v2: 0.7
         '400':
-          description: Bad Request - Input tidak valid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              examples:
-                noImage:
-                  summary: Tidak ada gambar
-                  value:
-                    error: "No image file provided"
-                invalidFilename:
-                  summary: Filename tidak valid
-                  value:
-                    error: "Invalid filename"
-                invalidFileType:
-                  summary: Tipe file tidak valid
-                  value:
-                    error: "Invalid file type"
-                invalidAge:
-                  summary: Usia tidak valid
-                  value:
-                    error: "Invalid age"
-                decodeError:
-                  summary: Gagal decode gambar
-                  value:
-                    error: "Failed to decode image bytes."
+          $ref: '#/components/responses/BadRequest'
         '413':
-          description: Payload Too Large - File melebihi 5MB
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: "File too large"
+          $ref: '#/components/responses/PayloadTooLarge'
         '415':
-          description: Unsupported Media Type
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: "Request must be JSON or multipart/form-data"
+          $ref: '#/components/responses/UnsupportedMediaType'
         '500':
-          description: Internal Server Error
+          $ref: '#/components/responses/InternalError'
+
+  /predict/v1:
+    post:
+      tags:
+        - Single Model
+      summary: Prediction V1 Only (Lightweight)
+      description: |
+        Prediksi menggunakan **Model V1 saja**.
+        
+        Model V1 lebih ringan dan cepat, cocok untuk:
+        - Screening awal
+        - Device dengan resource terbatas
+        - Batch processing
+      operationId: predictV1
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PredictRequestMultipart'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PredictRequestJSON'
+      responses:
+        '200':
+          description: Prediksi berhasil
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/SinglePredictResponse'
               example:
-                error: "Terjadi kesalahan sistem saat memproses gambar"
+                meta:
+                  timestamp: "2025-11-26T10:30:00.000Z"
+                  model: "V1 (Lightweight)"
+                predictions:
+                  v1:
+                    hgb: 14.2
+                    status: "Normal"
+                    severity: "normal"
+                    is_anemia: false
+                predicted_hgb: 14.2
+                status: "Normal"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /predict/v2:
+    post:
+      tags:
+        - Single Model
+      summary: Prediction V2 Only (Accurate)
+      description: |
+        Prediksi menggunakan **Model V2 saja**.
+        
+        Model V2 lebih akurat, cocok untuk:
+        - Diagnosis final
+        - Kasus yang memerlukan akurasi tinggi
+      operationId: predictV2
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PredictRequestMultipart'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PredictRequestJSON'
+      responses:
+        '200':
+          description: Prediksi berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SinglePredictResponse'
+              example:
+                meta:
+                  timestamp: "2025-11-26T10:30:00.000Z"
+                  model: "V2 (Accurate)"
+                predictions:
+                  v2:
+                    hgb: 14.6
+                    status: "Normal"
+                    severity: "normal"
+                    is_anemia: false
+                predicted_hgb: 14.6
+                status: "Normal"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /models:
+    get:
+      tags:
+        - Info
+      summary: Model Information
+      description: |
+        Mendapatkan informasi tentang model yang tersedia.
+      operationId: getModels
+      responses:
+        '200':
+          description: Informasi model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelsResponse'
 
   /health:
     get:
@@ -170,11 +270,7 @@ paths:
         - Health
       summary: Health Check
       description: |
-        Endpoint untuk memeriksa status kesehatan server.
-        Dapat digunakan untuk:
-        - Load balancer health checks
-        - Kubernetes liveness/readiness probes
-        - Monitoring uptime
+        Endpoint untuk memeriksa status kesehatan server dan model.
       operationId: healthCheck
       responses:
         '200':
@@ -185,6 +281,39 @@ paths:
                 $ref: '#/components/schemas/HealthResponse'
               example:
                 status: "ok"
+                models:
+                  v1: "anemia_model_v1.h5"
+                  v2: "model_anemia_v2.h5"
+
+  /docs:
+    get:
+      tags:
+        - Info
+      summary: API Documentation (Swagger UI)
+      description: Menampilkan dokumentasi API interaktif
+      operationId: getDocs
+      responses:
+        '200':
+          description: Swagger UI HTML page
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /openapi.yaml:
+    get:
+      tags:
+        - Info
+      summary: OpenAPI Specification
+      description: Download OpenAPI specification file
+      operationId: getOpenAPI
+      responses:
+        '200':
+          description: OpenAPI YAML file
+          content:
+            text/yaml:
+              schema:
+                type: string
 
 components:
   schemas:
@@ -197,28 +326,17 @@ components:
           type: string
           format: binary
           description: |
-            File gambar mata.
-            - Format: JPEG atau PNG
-            - Ukuran maksimal: 5MB
-            - Resolusi disarankan: minimal 224x224 pixels
+            File gambar mata (JPEG/PNG, max 5MB)
         gender:
           type: string
           description: |
-            Jenis kelamin pasien.
-            - `M` atau `0` = Laki-laki
-            - `F` atau `1` = Perempuan
+            Jenis kelamin: `M`/`0` = Male, `F`/`1` = Female
           enum: [M, F, '0', '1']
           default: M
-          example: M
         age:
           type: string
-          description: |
-            Usia pasien dalam tahun.
-            - Range valid: 0-120
-            - Default: 0
-          pattern: '^\d+(\.\d+)?$'
+          description: Usia pasien (0-120)
           default: '0'
-          example: '25'
 
     PredictRequestJSON:
       type: object
@@ -228,67 +346,161 @@ components:
         image:
           type: string
           format: byte
-          description: |
-            Gambar mata dalam format Base64.
-            - Ukuran maksimal setelah decode: 5MB
-          example: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYE..."
+          description: Gambar mata dalam format Base64
         gender:
           type: string
-          description: |
-            Jenis kelamin pasien.
-            - `M` atau `0` = Laki-laki  
-            - `F` atau `1` = Perempuan
           enum: [M, F, '0', '1']
           default: M
-          example: M
         age:
           oneOf:
             - type: string
             - type: number
-          description: |
-            Usia pasien dalam tahun.
-            - Range valid: 0-120
-            - Default: 0
           default: 0
-          example: 25
 
-    PredictResponse:
+    DualPredictResponse:
       type: object
       required:
+        - meta
         - predicted_hgb
         - status
+        - predictions
       properties:
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
         predicted_hgb:
           type: number
           format: float
-          description: |
-            Prediksi kadar Hemoglobin dalam g/dL.
-            
-            **Rentang Normal (WHO):**
-            - Laki-laki dewasa: 13.0 - 17.5 g/dL
-            - Perempuan dewasa: 12.0 - 15.5 g/dL
-          example: 14.5
-          minimum: 0
-          maximum: 25
+          description: Combined prediction (weighted average)
         status:
           type: string
-          description: |
-            Status anemia berdasarkan threshold 12.0 g/dL.
-            - `Normal`: Hgb >= 12.0 g/dL
-            - `Anemia`: Hgb < 12.0 g/dL
           enum: [Normal, Anemia]
-          example: Normal
+        predictions:
+          type: object
+          properties:
+            v1:
+              $ref: '#/components/schemas/ModelPrediction'
+            v2:
+              $ref: '#/components/schemas/ModelPrediction'
+            combined:
+              $ref: '#/components/schemas/CombinedPrediction'
+
+    SinglePredictResponse:
+      type: object
+      required:
+        - meta
+        - predicted_hgb
+        - status
+        - predictions
+      properties:
+        meta:
+          type: object
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+            model:
+              type: string
+        predicted_hgb:
+          type: number
+          format: float
+        status:
+          type: string
+          enum: [Normal, Anemia]
+        predictions:
+          type: object
+
+    ResponseMeta:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp
+        input:
+          type: object
+          properties:
+            gender:
+              type: string
+              enum: [Male, Female]
+            gender_code:
+              type: integer
+              enum: [0, 1]
+            age:
+              type: number
+
+    ModelPrediction:
+      type: object
+      properties:
+        hgb:
+          type: number
+          format: float
+          description: Predicted hemoglobin (g/dL)
+        status:
+          type: string
+          enum: [Normal, Anemia]
+        severity:
+          type: string
+          enum: [normal, mild, moderate]
+          description: |
+            Severity level:
+            - `normal`: Hgb >= threshold
+            - `mild`: threshold - 2 <= Hgb < threshold
+            - `moderate`: Hgb < threshold - 2
+        is_anemia:
+          type: boolean
+        error:
+          type: string
+          description: Error message if prediction failed
+
+    CombinedPrediction:
+      allOf:
+        - $ref: '#/components/schemas/ModelPrediction'
+        - type: object
+          properties:
+            weights:
+              type: object
+              properties:
+                v1:
+                  type: number
+                  example: 0.3
+                v2:
+                  type: number
+                  example: 0.7
+
+    ModelsResponse:
+      type: object
+      properties:
+        models:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              path:
+                type: string
+              description:
+                type: string
+              input_shape:
+                type: object
+              preprocessing:
+                type: string
+        endpoints:
+          type: object
 
     HealthResponse:
       type: object
-      required:
-        - status
       properties:
         status:
           type: string
-          description: Status kesehatan server
           enum: [ok]
-          example: ok
+        models:
+          type: object
+          properties:
+            v1:
+              type: string
+            v2:
+              type: string
 
     ErrorResponse:
       type: object
@@ -297,21 +509,47 @@ components:
       properties:
         error:
           type: string
-          description: Pesan error yang menjelaskan masalah
-          example: "No image file provided"
+        details:
+          type: object
 
-  examples:
-    NormalPrediction:
-      summary: Prediksi Normal
-      description: Contoh response untuk pasien dengan kadar Hgb normal
-      value:
-        predicted_hgb: 14.5
-        status: Normal
+  responses:
+    BadRequest:
+      description: Bad Request - Input tidak valid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            noImage:
+              value:
+                error: "No image file provided"
+            invalidAge:
+              value:
+                error: "Invalid age"
 
-    AnemiaPrediction:
-      summary: Prediksi Anemia
-      description: Contoh response untuk pasien dengan anemia
-      value:
-        predicted_hgb: 10.2
-        status: Anemia
+    PayloadTooLarge:
+      description: File melebihi 5MB
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "File too large"
 
+    UnsupportedMediaType:
+      description: Unsupported Media Type
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Request must be JSON or multipart/form-data"
+
+    InternalError:
+      description: Internal Server Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Terjadi kesalahan sistem saat memproses gambar"

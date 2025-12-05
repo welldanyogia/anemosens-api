@@ -1,0 +1,287 @@
+{
+	"info": {
+		"_postman_id": "a1b2c3d4-e5f6-47a8-b9c0-d1e2f3a4b5c6",
+		"name": "AneMoSense API - Dual Model",
+		"description": "REST API untuk deteksi anemia menggunakan Dual-Model Architecture (V1 Lightweight + V2 Accurate).\n\n## Features\n- Dual-Model Prediction (V1 + V2 + Combined)\n- Single-Model Prediction (V1 atau V2 saja)\n- Health Check & Model Info\n\n## Base URLs\n- **Local**: http://localhost:5000\n- **Production**: https://api.anemosense.webranastore.com",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "12345678"
+	},
+	"item": [
+		{
+			"name": "Prediction",
+			"item": [
+				{
+					"name": "POST /predict (Dual Model - Multipart)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has dual-model predictions\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('predictions');",
+									"    pm.expect(jsonData.predictions).to.have.property('v1');",
+									"    pm.expect(jsonData.predictions).to.have.property('v2');",
+									"    pm.expect(jsonData.predictions).to.have.property('combined');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "image",
+									"description": "File gambar mata (JPG/PNG, max 5MB)",
+									"type": "file",
+									"src": []
+								},
+								{
+									"key": "gender",
+									"value": "F",
+									"description": "M/0 = Male, F/1 = Female",
+									"type": "text"
+								},
+								{
+									"key": "age",
+									"value": "25",
+									"description": "Usia pasien (0-120)",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/predict",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"predict"
+							]
+						},
+						"description": "Menganalisis gambar mata menggunakan **kedua model (V1 & V2)** dan mengembalikan hasil gabungan.\n\n**Response Format:**\n```json\n{\n  \"meta\": {...},\n  \"predicted_hgb\": 14.5,\n  \"status\": \"Normal\",\n  \"predictions\": {\n    \"v1\": {\"hgb\": 14.2, \"status\": \"Normal\", ...},\n    \"v2\": {\"hgb\": 14.6, \"status\": \"Normal\", ...},\n    \"combined\": {\"hgb\": 14.5, \"weights\": {\"v1\": 0.3, \"v2\": 0.7}}\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "POST /predict (Dual Model - JSON Base64)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"image\": \"<base64-encoded-image-string>\",\n  \"gender\": \"F\",\n  \"age\": 25\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/predict",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"predict"
+							]
+						},
+						"description": "Alternative format menggunakan JSON dengan gambar di-encode Base64.\n\n**Cara encode gambar:**\n```bash\nbase64 -w 0 photo.jpg\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "POST /predict/v1 (Lightweight Only)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "image",
+									"type": "file",
+									"src": []
+								},
+								{
+									"key": "gender",
+									"value": "M",
+									"type": "text"
+								},
+								{
+									"key": "age",
+									"value": "30",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/predict/v1",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"predict",
+								"v1"
+							]
+						},
+						"description": "Prediksi menggunakan **Model V1 saja** (Lightweight, faster).\n\nCocok untuk:\n- Screening awal\n- Device dengan resource terbatas\n- Batch processing"
+					},
+					"response": []
+				},
+				{
+					"name": "POST /predict/v2 (Accurate Only)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "image",
+									"type": "file",
+									"src": []
+								},
+								{
+									"key": "gender",
+									"value": "F",
+									"type": "text"
+								},
+								{
+									"key": "age",
+									"value": "28",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/predict/v2",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"predict",
+								"v2"
+							]
+						},
+						"description": "Prediksi menggunakan **Model V2 saja** (Accurate).\n\nCocok untuk:\n- Diagnosis final\n- Kasus yang memerlukan akurasi tinggi"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoint untuk prediksi anemia menggunakan dual-model atau single-model"
+		},
+		{
+			"name": "Health & Info",
+			"item": [
+				{
+					"name": "GET /health",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Health check returns OK\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('ok');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Endpoint untuk memeriksa status kesehatan server dan model.\n\n**Response:**\n```json\n{\n  \"status\": \"ok\",\n  \"models\": {\n    \"v1\": \"anemia_model_v1.h5\",\n    \"v2\": \"model_anemia_v2.h5\"\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "GET /models",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/models",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"models"
+							]
+						},
+						"description": "Mendapatkan informasi detail tentang model yang tersedia (V1 & V2).\n\n**Response includes:**\n- Model names & paths\n- Input shape requirements\n- Preprocessing methods\n- Available endpoints"
+					},
+					"response": []
+				},
+				{
+					"name": "GET /docs (Swagger UI)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/docs",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"docs"
+							]
+						},
+						"description": "Menampilkan dokumentasi API interaktif (Swagger UI).\n\nBuka di browser untuk akses penuh."
+					},
+					"response": []
+				},
+				{
+					"name": "GET /openapi.yaml",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/openapi.yaml",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"openapi.yaml"
+							]
+						},
+						"description": "Download OpenAPI 3.0 specification file dalam format YAML."
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoint untuk monitoring, health check, dan informasi API"
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:5000",
+			"type": "string"
+		}
+	]
+}

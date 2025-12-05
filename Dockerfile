@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py model_anemia.h5 ./
+COPY app.py anemia_model_v1.h5 model_anemia_v2.h5 ./
 
 EXPOSE 5000
 

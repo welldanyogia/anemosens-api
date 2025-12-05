@@ -1,0 +1,331 @@
+╔════════════════════════════════════════════════════════════════╗
+║  AneMoSense Model Compatibility Tester - Google Colab          ║
+║  Copy-paste setiap CELL di bawah ke Google Colab notebook      ║
+╚════════════════════════════════════════════════════════════════╝
+
+================================================================================
+CELL 1: Upload Model Files
+================================================================================
+
+!pip install -q h5py
+
+from google.colab import files
+print("📤 Upload your model files (anemia_model_v1.h5 & model_anemia_v2.h5):")
+uploaded = files.upload()
+
+print(f"\n✅ Uploaded {len(uploaded)} file(s):")
+for filename in uploaded.keys():
+    print(f"   - {filename} ({len(uploaded[filename])/1024/1024:.2f} MB)")
+
+
+================================================================================
+CELL 2: Inspect Model Metadata (Find Keras Version)
+================================================================================
+
+import h5py
+import json
+
+def inspect_model(path):
+    print(f"\n{'='*60}")
+    print(f"📦 {path}")
+    print(f"{'='*60}")
+
+    with h5py.File(path, 'r') as f:
+        # Keras version
+        if 'keras_version' in f.attrs:
+            kv = f.attrs['keras_version']
+            if isinstance(kv, bytes):
+                kv = kv.decode('utf-8')
+            print(f"🔖 Keras Version: {kv}")
+
+        # Backend
+        if 'backend' in f.attrs:
+            backend = f.attrs['backend']
+            if isinstance(backend, bytes):
+                backend = backend.decode('utf-8')
+            print(f"🔖 Backend: {backend}")
+
+        # Model config
+        if 'model_config' in f.attrs:
+            mc = f.attrs['model_config']
+            if isinstance(mc, bytes):
+                mc = mc.decode('utf-8')
+            config = json.loads(mc)
+
+            print(f"📋 Model Class: {config.get('class_name')}")
+
+            if 'config' in config and 'layers' in config['config']:
+                layers = config['config']['layers']
+                print(f"📋 Layers: {len(layers)}")
+
+                # Check for compatibility issues
+                issues = []
+                for layer in layers:
+                    cfg = layer.get('config', {})
+                    if 'batch_shape' in cfg:
+                        issues.append("⚠️  Uses 'batch_shape' (deprecated)")
+                    if isinstance(cfg.get('dtype'), dict):
+                        issues.append("⚠️  Uses DTypePolicy dict")
+
+                if issues:
+                    print(f"\n💡 Compatibility Issues:")
+                    for issue in set(issues):
+                        print(f"   {issue}")
+                    print(f"   → Recommended: TensorFlow 2.10-2.12")
+
+# Inspect models
+for model_file in ['anemia_model_v1.h5', 'model_anemia_v2.h5']:
+    try:
+        inspect_model(model_file)
+    except FileNotFoundError:
+        print(f"❌ {model_file} not found (upload di CELL 1)")
+
+
+================================================================================
+CELL 3: Test with Colab Default TensorFlow (Usually 2.15+)
+================================================================================
+
+import tensorflow as tf
+print(f"{'='*60}")
+print(f"Testing with Default TensorFlow")
+print(f"{'='*60}")
+print(f"TensorFlow: {tf.__version__}")
+print(f"Keras: {tf.keras.__version__}\n")
+
+def test_load(path):
+    try:
+        print(f"🔄 Loading {path}...")
+        model = tf.keras.models.load_model(path, compile=False)
+        print(f"✅ SUCCESS!\n")
+        model.summary()
+        return model
+    except Exception as e:
+        print(f"❌ FAILED: {type(e).__name__}")
+        print(f"   {str(e)[:200]}\n")
+        return None
+
+# Test both models
+m1 = test_load('anemia_model_v1.h5')
+m2 = test_load('model_anemia_v2.h5')
+
+if m1 and m2:
+    print("\n🎉 Models are COMPATIBLE with current TensorFlow!")
+    print("   → You can skip to CELL 6 (Re-save)")
+else:
+    print("\n⚠️  Models NOT compatible → Continue to CELL 4")
+
+
+================================================================================
+CELL 4: Test with TensorFlow 2.10 (Most Likely to Work)
+================================================================================
+
+# Uninstall current TF
+!pip uninstall -y -q tensorflow tensorflow-estimator keras tf-keras
+
+# Install TF 2.10
+print("📥 Installing TensorFlow 2.10.0...")
+!pip install -q tensorflow==2.10.0 h5py
+
+# Reload module
+import importlib
+import sys
+for mod in ['tensorflow', 'keras']:
+    if mod in sys.modules:
+        del sys.modules[mod]
+
+import tensorflow as tf
+print(f"✅ TensorFlow {tf.__version__}")
+print(f"✅ Keras {tf.keras.__version__}\n")
+
+# Test load
+print("🔄 Testing Model V1...")
+try:
+    model_v1 = tf.keras.models.load_model('anemia_model_v1.h5', compile=False)
+    print("✅ Model V1 loaded!\n")
+except Exception as e:
+    print(f"❌ V1 failed: {e}\n")
+    model_v1 = None
+
+print("🔄 Testing Model V2...")
+try:
+    model_v2 = tf.keras.models.load_model('model_anemia_v2.h5', compile=False)
+    print("✅ Model V2 loaded!\n")
+except Exception as e:
+    print(f"❌ V2 failed: {e}\n")
+    model_v2 = None
+
+# Test prediction
+if model_v1:
+    print("🧪 Testing prediction with Model V1...")
+    import numpy as np
+    test_img = np.random.rand(1, 224, 224, 3).astype(np.float32)
+    test_meta = np.array([[0, 25]], dtype=np.float32)
+
+    pred = model_v1.predict([test_img, test_meta], verbose=0)
+    print(f"✅ Prediction works! HGB: {pred[0][0]:.2f}\n")
+
+if model_v1 and model_v2:
+    print("🎉 SUCCESS! TensorFlow 2.10.0 is COMPATIBLE")
+    print("   → Continue to CELL 5 (Re-save)")
+else:
+    print("❌ Still failing → Try CELL 4B (other versions)")
+
+
+================================================================================
+CELL 4B: Try Other TensorFlow Versions (OPTIONAL)
+================================================================================
+
+# Hanya jalankan jika CELL 4 gagal
+
+versions = ["2.11.0", "2.9.0", "2.8.0", "2.12.0"]
+
+for version in versions:
+    print(f"\n{'='*60}")
+    print(f"Testing TensorFlow {version}")
+    print(f"{'='*60}")
+
+    !pip uninstall -y -q tensorflow tensorflow-estimator keras tf-keras
+    !pip install -q tensorflow=={version} h5py
+
+    import importlib, sys
+    for mod in ['tensorflow', 'keras']:
+        if mod in sys.modules:
+            del sys.modules[mod]
+
+    import tensorflow as tf
+    print(f"✅ TensorFlow {tf.__version__}")
+
+    try:
+        m1 = tf.keras.models.load_model('anemia_model_v1.h5', compile=False)
+        m2 = tf.keras.models.load_model('model_anemia_v2.h5', compile=False)
+
+        print(f"\n🎉 FOUND WORKING VERSION: {version}")
+        print(f"   → Continue to CELL 5 (Re-save)")
+
+        model_v1 = m1
+        model_v2 = m2
+        break
+
+    except Exception as e:
+        print(f"❌ Failed: {str(e)[:100]}")
+        continue
+
+
+================================================================================
+CELL 5: Re-save Models (JALANKAN JIKA CELL 4 BERHASIL)
+================================================================================
+
+# Pastikan model_v1 dan model_v2 sudah ter-load dari CELL 4
+
+print("🔄 Re-saving models in compatible format...\n")
+
+# Save Model V1
+print("💾 Saving Model V1...")
+model_v1.save('anemia_model_v1_fixed.h5', save_format='h5')
+print(f"   ✅ anemia_model_v1_fixed.h5 saved")
+
+model_v1.save('anemia_model_v1_savedmodel', save_format='tf')
+print(f"   ✅ anemia_model_v1_savedmodel/ saved")
+
+# Save Model V2
+print("\n💾 Saving Model V2...")
+model_v2.save('model_anemia_v2_fixed.h5', save_format='h5')
+print(f"   ✅ model_anemia_v2_fixed.h5 saved")
+
+model_v2.save('model_anemia_v2_savedmodel', save_format='tf')
+print(f"   ✅ model_anemia_v2_savedmodel/ saved")
+
+# Zip SavedModel directories
+print("\n📦 Creating ZIP files...")
+!zip -q -r anemia_model_v1_savedmodel.zip anemia_model_v1_savedmodel
+!zip -q -r model_anemia_v2_savedmodel.zip model_anemia_v2_savedmodel
+print("   ✅ ZIP files created")
+
+# Verify files
+print("\n📋 Files created:")
+!ls -lh *.h5 *.zip | awk '{print "   " $9 " - " $5}'
+
+
+================================================================================
+CELL 6: Download Fixed Models
+================================================================================
+
+from google.colab import files
+
+print("📥 Downloading fixed models...\n")
+
+# Download H5 files (recommended)
+print("1️⃣  Downloading H5 format (recommended)...")
+files.download('anemia_model_v1_fixed.h5')
+files.download('model_anemia_v2_fixed.h5')
+
+# Download SavedModel format (alternative)
+print("\n2️⃣  Downloading SavedModel format (alternative)...")
+files.download('anemia_model_v1_savedmodel.zip')
+files.download('model_anemia_v2_savedmodel.zip')
+
+print("\n✅ DONE!")
+print("\n📋 Next Steps:")
+print("   1. Rename files:")
+print("      mv anemia_model_v1_fixed.h5 → anemia_model_v1.h5")
+print("      mv model_anemia_v2_fixed.h5 → model_anemia_v2.h5")
+print("   2. Replace old models in your project")
+print("   3. Keep Dockerfile with TensorFlow 2.12.0")
+print("   4. Rebuild Docker and test!")
+
+
+================================================================================
+CELL 7: Verify Re-saved Models (OPTIONAL)
+================================================================================
+
+# Test load the newly saved models to confirm they work
+
+print("🧪 Verifying re-saved models...\n")
+
+# Test H5 format
+print("Testing H5 format:")
+try:
+    test_v1 = tf.keras.models.load_model('anemia_model_v1_fixed.h5', compile=False)
+    print("   ✅ anemia_model_v1_fixed.h5 loads OK")
+except Exception as e:
+    print(f"   ❌ Failed: {e}")
+
+try:
+    test_v2 = tf.keras.models.load_model('model_anemia_v2_fixed.h5', compile=False)
+    print("   ✅ model_anemia_v2_fixed.h5 loads OK")
+except Exception as e:
+    print(f"   ❌ Failed: {e}")
+
+# Test SavedModel format
+print("\nTesting SavedModel format:")
+try:
+    test_v1_sm = tf.keras.models.load_model('anemia_model_v1_savedmodel', compile=False)
+    print("   ✅ anemia_model_v1_savedmodel loads OK")
+except Exception as e:
+    print(f"   ❌ Failed: {e}")
+
+try:
+    test_v2_sm = tf.keras.models.load_model('model_anemia_v2_savedmodel', compile=False)
+    print("   ✅ model_anemia_v2_savedmodel loads OK")
+except Exception as e:
+    print(f"   ❌ Failed: {e}")
+
+# Test prediction
+print("\n🧪 Testing prediction with re-saved model:")
+import numpy as np
+test_img = np.random.rand(1, 224, 224, 3).astype(np.float32)
+test_meta = np.array([[1, 30]], dtype=np.float32)  # Female, 30 years
+
+pred_v1 = test_v1.predict([test_img, test_meta], verbose=0)
+pred_v2 = test_v2.predict([test_img, test_meta], verbose=0)
+
+print(f"   Model V1 prediction: {pred_v1[0][0]:.2f} g/dL")
+print(f"   Model V2 prediction: {pred_v2[0][0]:.2f} g/dL")
+print(f"   Combined (30%/70%): {(0.3*pred_v1[0][0] + 0.7*pred_v2[0][0]):.2f} g/dL")
+
+print("\n✅ Re-saved models work perfectly!")
+
+
+╔════════════════════════════════════════════════════════════════╗
+║  END OF NOTEBOOK - Selesai!                                    ║
+╚════════════════════════════════════════════════════════════════╝

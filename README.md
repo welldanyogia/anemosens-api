@@ -1,20 +1,30 @@
 # Anemosense API
 
-Flask-based REST API for anemia prediction using TensorFlow/EfficientNet model. Provides endpoints for image-based hemoglobin level prediction with metadata support.
+Flask-based REST API for anemia prediction using **Dual-Model Architecture** (TensorFlow/Keras). Provides endpoints for image-based hemoglobin level prediction with metadata support.
 
 ## Features
 
-- **ML Model Inference**: TensorFlow/Keras EfficientNet-based anemia detection
-- **Multi-format Input**: Supports both `multipart/form-data` and `application/json`
-- **CORS Support**: Configured for cross-origin requests (Sprint 1)
-- **Production Ready**: Gunicorn WSGI server with Docker support
-- **Health Monitoring**: `/health` endpoint for uptime checks
+- **🚀 Dual-Model Inference**: V1 (Lightweight/Fast) + V2 (Accurate) + Combined Result
+- **📊 Multi-Model Support**: Choose between V1-only, V2-only, or Dual-Model prediction
+- **📤 Multi-format Input**: Supports both `multipart/form-data` and `application/json`
+- **🔒 CORS Support**: Configured for cross-origin requests (Sprint 1)
+- **⚙️ Production Ready**: Gunicorn WSGI server with Docker support
+- **📖 Interactive Docs**: Swagger UI for API exploration
+- **💚 Health Monitoring**: `/health` and `/models` endpoints
+
+## Model Architecture
+
+| Model | Size | Description | Use Case |
+|-------|------|-------------|----------|
+| **V1 (Lightweight)** | 11 MB | MobileNetV2-based, faster inference | Screening, batch processing, low-resource devices |
+| **V2 (Accurate)** | 49 MB | EfficientNet-based, higher accuracy | Final diagnosis, high-accuracy requirements |
+| **Combined** | Both | Weighted average (30% V1 + 70% V2) | Best balance of speed and accuracy |
 
 ## Sprint 1 Updates (Security Hardening)
 
 ### BE-01: CORS Implementation ✅
 - **Added**: `flask-cors` with whitelist configuration
-- **Security**: Only allows `localhost` (dev) and `https://anemosense.webranastore.com` (prod)
+- **Security**: Only allows `localhost` (dev) and `https://anemosense.webrana.id` (prod)
 - **Regex Support**: Dynamic port matching for localhost development
 - **Credentials**: Supports cookie/auth header forwarding
 
@@ -101,10 +111,10 @@ File OpenAPI 3.0 spec tersedia di:
 
 ## API Endpoints
 
-### 1. Predict Anemia
+### 1. Dual-Model Prediction (Recommended)
 **POST** `/predict`
 
-Accepts image + metadata and returns hemoglobin prediction.
+Menganalisis gambar mata menggunakan **kedua model (V1 & V2)** dan mengembalikan hasil gabungan.
 
 **Request (multipart/form-data)**:
 ```bash
@@ -125,49 +135,122 @@ curl -X POST http://localhost:5000/predict \
   }'
 ```
 
-**Response**:
+**Response (Dual-Model)**:
 ```json
 {
-  "predicted_hgb": 12.5,
-  "status": "Normal"
+  "meta": {
+    "timestamp": "2025-11-26T10:30:00.000Z",
+    "input": {
+      "gender": "Female",
+      "gender_code": 1,
+      "age": 25
+    }
+  },
+  "predicted_hgb": 14.5,
+  "status": "Normal",
+  "predictions": {
+    "v1": {
+      "hgb": 14.2,
+      "status": "Normal",
+      "severity": "normal",
+      "is_anemia": false
+    },
+    "v2": {
+      "hgb": 14.6,
+      "status": "Normal",
+      "severity": "normal",
+      "is_anemia": false
+    },
+    "combined": {
+      "hgb": 14.5,
+      "status": "Normal",
+      "severity": "normal",
+      "is_anemia": false,
+      "weights": {
+        "v1": 0.3,
+        "v2": 0.7
+      }
+    }
+  }
 }
 ```
 
 **Parameters**:
 - `image`: Image file (JPG/PNG) or base64 string
-- `age`: Patient age (float)
-- `gender`: `M` (male) or `F` (female)
+- `age`: Patient age (0-120)
+- `gender`: `M`/`0` (male) or `F`/`1` (female)
 
 **Status Codes**:
 - `200`: Success
-- `400`: Invalid input (missing image, bad format)
+- `400`: Invalid input (missing image, bad format, invalid age)
+- `413`: File too large (>5MB)
 - `415`: Unsupported media type
 - `500`: Prediction failed
 
 ---
 
-### 2. Health Check
+### 2. Single-Model Predictions
+
+**POST** `/predict/v1` - Model V1 Only (Lightweight)
+
+Prediksi menggunakan **Model V1 saja** (faster, lighter).
+
+**POST** `/predict/v2` - Model V2 Only (Accurate)
+
+Prediksi menggunakan **Model V2 saja** (more accurate).
+
+Format request sama dengan `/predict`, response hanya berisi hasil dari satu model.
+
+---
+
+### 3. Health Check & Model Info
 **GET** `/health`
 
-Returns API status for monitoring.
+Returns API status and loaded models.
 
 **Response**:
 ```json
 {
-  "status": "ok"
+  "status": "ok",
+  "models": {
+    "v1": "anemia_model_v1.h5",
+    "v2": "model_anemia_v2.h5"
+  }
 }
 ```
 
+**GET** `/models`
+
+Returns detailed information about available models, input shapes, preprocessing, and endpoints.
+
 ---
 
-### 3. API Documentation
+### 4. API Documentation
 **GET** `/docs`
 
 Interactive Swagger UI untuk menjelajahi dan menguji API.
 
+**Akses:**
+- **Local**: http://localhost:5000/docs
+- **Production**: https://api.anemosense.webranastore.com/docs
+
 **GET** `/openapi.yaml`
 
 OpenAPI 3.0 specification file dalam format YAML.
+
+---
+
+## Postman Collection
+
+Import file `anemosense_api.postman_collection.json` ke Postman untuk testing.
+
+**Quick Start:**
+1. Import collection ke Postman
+2. Set variable `{{base_url}}`:
+   - Local: `http://localhost:5000`
+   - Production: `https://api.anemosense.webranastore.com`
+3. Upload gambar mata di request `POST /predict`
+4. Run request!
 
 ---
 
@@ -307,10 +390,11 @@ Certbot will auto-configure HTTPS and set up renewal cron job.
 Flask==3.0.0              # Web framework
 numpy==1.26.2             # Array operations
 opencv-python-headless==4.8.1.78  # Image processing
-tensorflow==2.15.0        # ML model inference
+tensorflow==2.15.0        # ML model inference (dual-model support)
 gunicorn==21.2.0          # WSGI server (production)
 flask-cors==4.0.0         # CORS middleware (Sprint 1)
 python-dotenv==1.0.0      # Environment variables (Sprint 1)
+h5py==3.10.0              # HDF5 model file handling (compatibility layer)
 ```
 
 All versions are pinned for reproducibility (Sprint 1 update).
@@ -356,11 +440,14 @@ All versions are pinned for reproducibility (Sprint 1 update).
 3. For localhost, ensure port matches regex pattern
 
 ### Model Loading Errors
-**Problem**: `FileNotFoundError: model_anemia.h5`
+**Problem**: `FileNotFoundError` or `TypeError: batch_shape` error
 
 **Solution**:
-1. Ensure `model_anemia.h5` is in same directory as `app.py`
-2. Check `MODEL_PATH` in `.env` if using custom location
+1. Ensure both model files exist:
+   - `anemia_model_v1.h5` (11 MB)
+   - `model_anemia_v2.h5` (49 MB)
+2. The app includes a compatibility layer for legacy Keras models
+3. Check Docker logs: `docker logs anemosense-api`
 
 ### Docker Build Issues
 **Problem**: `pip install` fails during build
@@ -382,11 +469,12 @@ All versions are pinned for reproducibility (Sprint 1 update).
 
 ---
 
-**Last Updated**: Sprint 3 - Refactoring & Production Readiness
-**API Version**: 1.2.0
-**Production URL**: https://anemosense.webranastore.com
+**Last Updated**: Sprint 4 - Dual-Model Architecture
+**API Version**: 2.0.0
+**Production URL**: https://api.anemosense.webranastore.com
 
 **Sprint History**:
 - Sprint 1: Security Hardening (CORS, environment config)
 - Sprint 2: Stability & Resilience (Input validation, error handling)
 - Sprint 3: Refactoring & Production Readiness (Gunicorn workers, API docs, gender encoding fix)
+- Sprint 4: Dual-Model Architecture (V1+V2 models, combined predictions, legacy model compatibility)

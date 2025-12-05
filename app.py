@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """
-app.py — Flask service for anemia prediction with EfficientNet-based model.
-Includes a hack to suppress Colab’s debugpy “get_shape” errors when run inside notebooks.
+app.py — Flask service for anemia prediction.
+
+Model:
+- Model V2 (model_anemia_v2.h5): Single accurate model with internal normalization.
+
+Inputs:
+- Input 1: Image (224, 224, 3)
+- Input 2: Metadata [gender_code, age]
 """
 
 # ─── Debugpy / Colab repr hack ──────────────────────────────────────────────────
-# If running in Colab, patch google.colab._debugpy_repr.get_shape so it never raises.
 try:
     import google.colab._debugpy_repr as _repr
     _orig_get_shape = _repr.get_shape
@@ -18,7 +23,6 @@ try:
 
     _repr.get_shape = _safe_get_shape
 except ImportError:
-    # Not in Colab; no patch needed.
     pass
 
 # ─── Standard imports ──────────────────────────────────────────────────────────
@@ -26,6 +30,11 @@ import logging
 import os
 import base64
 import re
+from datetime import datetime, timezone
+import json
+import h5py
+import tempfile
+import shutil
 
 import numpy as np
 import cv2
@@ -33,44 +42,134 @@ import tensorflow as tf
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from tensorflow.keras.applications.efficientnet import preprocess_input
+from tensorflow.keras.applications.efficientnet import preprocess_input as efficientnet_preprocess
 from dotenv import load_dotenv
 
 # ─── Configuration ──────────────────────────────────────────────────────────────
-# Load environment variables from .env file
 load_dotenv()
 
-# Silence all logs below ERROR level
 logging.getLogger().setLevel(logging.ERROR)
 
-# Path to your trained model (update as needed)
-MODEL_PATH = 'model_anemia.h5'
+# Model paths
+MODEL_PATH = 'model_anemia_v2.h5'
 
-# Input image size for the model
+# Input image size
 IMG_SIZE = (224, 224)
 
-# ─── Load the model ─────────────────────────────────────────────────────────────
-# The semicolon suppresses Jupyter repr if accidentally loaded in a cell
-model = tf.keras.models.load_model(MODEL_PATH, compile=False);
+# Anemia threshold (Hgb in g/dL)
+ANEMIA_THRESHOLD = 12.0
 
-# ─── Flask app setup ───────────────────────────────────────────────────────────
-app = Flask(__name__)
+# ─── Model Loading with Compatibility Layer ────────────────────────────────────
 
-# ─── CORS Configuration ─────────────────────────────────────────────────────────
-# Allow requests from localhost (development) and production domain
-# Regex pattern allows localhost with any port number (e.g., :3000, :5000, :8080)
-CORS(app,
-     origins=[
-         re.compile(r"^http://localhost(:\d+)?$"),  # Match localhost with optional port
-         "https://anemosense.webranastore.com"
-     ],
-     supports_credentials=True)
+def load_model_with_compat(model_path: str):
+    """
+    Load Keras model with compatibility for older model formats.
+    Handles the batch_shape -> shape migration in InputLayer.
+    """
+    try:
+        # First, try standard loading
+        return tf.keras.models.load_model(model_path, compile=False)
+    except TypeError as e:
+        if 'batch_shape' not in str(e):
+            raise  # Re-raise if it's a different error
+
+        print(f"   ⚠️  Detected legacy model format, applying compatibility fix...")
+
+        # Read the model config
+        with h5py.File(model_path, 'r') as f:
+            model_config = f.attrs.get('model_config')
+            if model_config is None:
+                raise ValueError("Model config not found in h5 file")
+
+            # Parse the config
+            if isinstance(model_config, bytes):
+                model_config = model_config.decode('utf-8')
+            config = json.loads(model_config)
+
+        # Fix layer configs (convert incompatible formats)
+        def fix_layer_config(layer_cfg):
+            cfg = layer_cfg.get('config', {})
+
+            # Fix InputLayer batch_shape issues
+            if layer_cfg.get('class_name') == 'InputLayer':
+                # Handle batch_shape (old format)
+                if 'batch_shape' in cfg:
+                    batch_shape = cfg.pop('batch_shape')
+                    if batch_shape and len(batch_shape) > 1:
+                        cfg['batch_input_shape'] = batch_shape
+
+                # Remove 'shape' if present (not supported in some versions)
+                if 'shape' in cfg:
+                    shape = cfg.pop('shape')
+                    if shape:
+                        cfg['batch_input_shape'] = [None] + list(shape)
+
+                # Ensure we have batch_input_shape
+                if 'batch_input_shape' not in cfg and 'input_shape' in cfg:
+                    cfg['batch_input_shape'] = [None] + list(cfg.pop('input_shape'))
+
+            # Fix DTypePolicy issues across all layers
+            if 'dtype' in cfg:
+                dtype_val = cfg['dtype']
+                # If dtype is a dict with DTypePolicy structure, extract the actual dtype
+                if isinstance(dtype_val, dict):
+                    if 'config' in dtype_val and 'name' in dtype_val['config']:
+                        # Extract just the dtype name (e.g., 'float32')
+                        cfg['dtype'] = dtype_val['config']['name']
+                    elif 'class_name' in dtype_val:
+                        # Fallback: use class_name if no config.name
+                        cfg['dtype'] = 'float32'  # Default to float32
+
+            # Fix initializers if they have module structure
+            for key in ['kernel_initializer', 'bias_initializer', 'gamma_initializer',
+                       'beta_initializer', 'moving_mean_initializer', 'moving_variance_initializer']:
+                if key in cfg and isinstance(cfg[key], dict):
+                    if 'module' in cfg[key]:
+                        # Simplify to just class_name and config
+                        cfg[key] = {
+                            'class_name': cfg[key].get('class_name', 'GlorotUniform'),
+                            'config': cfg[key].get('config', {})
+                        }
+
+            return layer_cfg
+
+        # Process all layers
+        if 'config' in config:
+            if 'layers' in config['config']:
+                for layer in config['config']['layers']:
+                    fix_layer_config(layer)
+            elif isinstance(config['config'], dict):
+                fix_layer_config(config['config'])
+
+        # Create a temporary patched model file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.h5') as tmp_file:
+            tmp_path = tmp_file.name
+
+        try:
+            # Copy original file to temp
+            shutil.copy2(model_path, tmp_path)
+
+            # Update the config in the temp file
+            with h5py.File(tmp_path, 'r+') as f:
+                f.attrs.modify('model_config', json.dumps(config).encode('utf-8'))
+
+            # Load from the patched temp file
+            model = tf.keras.models.load_model(tmp_path, compile=False)
+            print(f"   ✅ Legacy model loaded successfully")
+            return model
+        finally:
+            # Clean up temp file
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+
+print("🔄 Loading Model V2 (Accurate)...")
+model = load_model_with_compat(MODEL_PATH)
+print(f"   ✅ Model loaded: {MODEL_PATH}")
+
 
 def validate_age(age_value) -> tuple:
-    """
-    Validate age input is a valid number between 0 and 120.
-    Returns (age_float, error_message).
-    """
+    """Validate age input is a valid number between 0 and 120."""
     try:
         age = float(age_value)
         if age < 0 or age > 120:
@@ -81,84 +180,130 @@ def validate_age(age_value) -> tuple:
 
 
 def validate_file_size(file_obj, max_size_mb=5) -> bool:
-    """
-    Check if file size is within the allowed limit.
-    Uses seek/tell to check size without loading entire file into memory.
-    """
+    """Check if file size is within the allowed limit."""
     file_obj.seek(0, os.SEEK_END)
     size_bytes = file_obj.tell()
-    file_obj.seek(0)  # Reset to beginning
-
+    file_obj.seek(0)
     max_bytes = max_size_mb * 1024 * 1024
     return size_bytes <= max_bytes
 
 
-def prep_image_for_flask(img_data: bytes, img_size=IMG_SIZE) -> np.ndarray:
+def decode_image(img_data: bytes) -> np.ndarray:
     """
-    Decode raw JPEG/PNG bytes, convert to RGB, resize to `img_size`, preprocess,
-    and return a batch of shape (1, H, W, C).
+    Decode raw JPEG/PNG bytes to RGB numpy array.
+    Returns: np.ndarray of shape (H, W, 3) in RGB format, dtype uint8
     """
-    # Convert to OpenCV image
     arr = np.frombuffer(img_data, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("Failed to decode image bytes.")
-
-    # BGR->RGB, resize, and EfficientNet preprocessing
+    # BGR -> RGB
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = cv2.resize(img, img_size)
-    img = preprocess_input(img.astype(np.float32))
-    return np.expand_dims(img, axis=0)
+    # Resize to model input size
+    img = cv2.resize(img, IMG_SIZE)
+    return img
+
+
+def preprocess_for_model(img: np.ndarray) -> np.ndarray:
+    """
+    Preprocess image for Model V2 (EfficientNet-style).
+    """
+    img_float = img.astype(np.float32)
+    img_processed = efficientnet_preprocess(img_float)
+    return np.expand_dims(img_processed, axis=0)
+
+
+def get_status(hgb: float, gender_code: int) -> dict:
+    """
+    Determine anemia status based on Hgb and gender.
+    
+    WHO thresholds:
+    - Male: < 13.0 g/dL = Anemia
+    - Female: < 12.0 g/dL = Anemia
+    
+    Returns status info dict.
+    """
+    threshold = 13.0 if gender_code == 0 else 12.0  # Male vs Female
+    
+    if hgb < threshold - 2:
+        severity = "moderate"
+    elif hgb < threshold:
+        severity = "mild"
+    else:
+        severity = "normal"
+    
+    is_anemia = hgb < threshold
+    
+    return {
+        "is_anemia": is_anemia,
+        "status": "Anemia" if is_anemia else "Normal",
+        "severity": severity,
+        "threshold": threshold
+    }
+
+
+def predict_single_model(model_instance, img_batch: np.ndarray, meta_batch: np.ndarray) -> float:
+    """Run prediction on the model and return Hgb value."""
+    prediction = model_instance.predict([img_batch, meta_batch], verbose=0)
+    return float(prediction[0, 0])
+
+
+# ─── API Endpoints ─────────────────────────────────────────────────────────────
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    """
+    Main prediction endpoint.
+    
+    Accepts:
+    - multipart/form-data with 'image', 'gender', 'age'
+    - application/json with base64 'image', 'gender', 'age'
+    
+    Returns:
+    - meta: timestamp and request info
+    - predicted_hgb: Hgb value
+    - status: Anemia status
+    """
     try:
-        # —————— CASE 1: multipart/form-data ——————
-        if request.content_type.startswith('multipart/'):
-            # ambil file image
+        # ─── Parse Input ───────────────────────────────────────────────────
+        if request.content_type and request.content_type.startswith('multipart/'):
             img_file = request.files.get('image') or request.files.get('file')
             if not img_file:
                 return jsonify({"error": "No image file provided"}), 400
 
-            # Validate filename
             if not img_file.filename or img_file.filename.strip() == '':
                 return jsonify({"error": "Invalid filename"}), 400
 
-            # Validate MIME type
             if not img_file.mimetype or not img_file.mimetype.startswith('image/'):
                 return jsonify({"error": "Invalid file type"}), 400
 
-            # Validate file size (max 5MB)
             if not validate_file_size(img_file, max_size_mb=5):
                 return jsonify({"error": "File too large"}), 413
 
             img_bytes = img_file.read()
 
-            # Validate age
             age_str = request.form.get('age', '0')
             age, error = validate_age(age_str)
             if error:
                 return jsonify({"error": error}), 400
 
             gender = request.form.get('gender', 'M').strip().upper()
-        # —————— CASE 2: application/json ——————
+
         else:
             if not request.is_json:
                 return jsonify({"error": "Request must be JSON or multipart/form-data"}), 415
+            
             data = request.get_json()
             img_b64 = data.get('image')
             if not img_b64:
                 return jsonify({"error": "No image data provided"}), 400
 
-            # Decode base64 image
             img_bytes = base64.b64decode(img_b64)
 
-            # Validate decoded image size (max 5MB)
             max_bytes = 5 * 1024 * 1024
             if len(img_bytes) > max_bytes:
                 return jsonify({"error": "File too large"}), 413
 
-            # Validate age
             age_str = data.get('age', '0')
             age, error = validate_age(age_str)
             if error:
@@ -166,52 +311,114 @@ def predict():
 
             gender = data.get('gender', 'M').strip().upper()
 
-        # Encode gender - handle both formats:
-        # "M"/"F" (standard) or "0"/"1" (legacy mobile app)
+        # ─── Encode Gender ─────────────────────────────────────────────────
+        # Handle both "M"/"F" and "0"/"1" formats
         if gender in ['F', '1', '1.0']:
             gender_code = 1  # Female
         else:
-            gender_code = 0  # Male (default for "M", "0", "0.0", or any other value)
+            gender_code = 0  # Male
 
-        # preprocessing
-        img_batch  = prep_image_for_flask(img_bytes)
-        meta_batch = np.array([[age, gender_code]], dtype=np.float32)
+        # ─── Decode & Preprocess Image ─────────────────────────────────────
+        img_rgb = decode_image(img_bytes)
+        
+        # Preprocess for model
+        img_batch = preprocess_for_model(img_rgb)
+        
+        # Metadata batch
+        # Format: [gender_code, age] based on training
+        meta_batch = np.array([[gender_code, age]], dtype=np.float32)
 
-        # predict
-        pred_hgb = float(model.predict([img_batch, meta_batch], verbose=0)[0,0])
-        threshold = 12.0
-        status = "Anemia" if pred_hgb < threshold else "Normal"
+        # ─── Run Prediction ────────────────────────────────────────────────
+        try:
+            hgb = predict_single_model(model, img_batch, meta_batch)
+            hgb = round(hgb, 2)
+            status_info = get_status(hgb, gender_code)
+        except Exception as e:
+            print(f"Model Error: {e}")
+            return jsonify({
+                "error": "Prediction failed",
+                "details": str(e)
+            }), 500
 
+        # ─── Build Response ────────────────────────────────────────────────
+        timestamp = datetime.now(timezone.utc).isoformat()
+        
         return jsonify({
-            "predicted_hgb": pred_hgb,
-            "status": status
+            # Metadata
+            "meta": {
+                "timestamp": timestamp,
+                "input": {
+                    "gender": "Female" if gender_code == 1 else "Male",
+                    "gender_code": gender_code,
+                    "age": age
+                },
+                "model": "V2 (Single)"
+            },
+            
+            # Result
+            "predicted_hgb": hgb,
+            "status": status_info["status"],
+            "severity": status_info["severity"],
+            "is_anemia": status_info["is_anemia"],
+            
+            # Legacy campatibility (optional, but good to keep structure for safety)
+            "predictions": {
+                "v2": {
+                     "hgb": hgb,
+                     "status": status_info["status"],
+                     "severity": status_info["severity"],
+                     "is_anemia": status_info["is_anemia"]
+                }
+            }
         })
 
     except ValueError as ve:
-        # Validation errors are safe to expose
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
-        # Log the full error for internal debugging
         print(f"INTERNAL ERROR: {e}")
-        # Return generic message to prevent information disclosure
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": "Terjadi kesalahan sistem saat memproses gambar"}), 500
 
 
-# ─── Health-check route ───────────────────────────────────────────────────────
+# ─── Health & Info Endpoints ───────────────────────────────────────────────────
+
 @app.route('/health', methods=['GET'])
 def health_check():
-    """
-    Health-check endpoint to verify the application is running.
-    """
-    return jsonify({"status": "ok"}), 200
+    """Health-check endpoint."""
+    return jsonify({
+        "status": "ok",
+        "model": MODEL_PATH
+    }), 200
 
 
-# ─── API Documentation routes ─────────────────────────────────────────────────
+@app.route('/models', methods=['GET'])
+def model_info():
+    """Get information about loaded models."""
+    return jsonify({
+        "models": [
+            {
+                "name": "Model V2",
+                "path": MODEL_PATH,
+                "description": "Accurate anemia prediction model.",
+                "input_shape": {
+                    "image": [224, 224, 3],
+                    "metadata": ["gender_code", "age"]
+                },
+                "preprocessing": "EfficientNet-style"
+            }
+        ],
+        "endpoints": {
+            "/predict": "Prediction endpoint"
+        }
+    }), 200
+
+
+# ─── API Documentation ─────────────────────────────────────────────────────────
+
 @app.route('/docs', methods=['GET'])
 def swagger_ui():
-    """
-    Serve Swagger UI for API documentation.
-    """
+    """Serve Swagger UI for API documentation."""
     return '''
     <!DOCTYPE html>
     <html>
@@ -251,16 +458,14 @@ def swagger_ui():
 
 @app.route('/openapi.yaml', methods=['GET'])
 def openapi_spec():
-    """
-    Serve OpenAPI specification file.
-    """
+    """Serve OpenAPI specification file."""
     try:
         with open('openapi.yaml', 'r', encoding='utf-8') as f:
             return f.read(), 200, {'Content-Type': 'text/yaml'}
     except FileNotFoundError:
         return jsonify({"error": "OpenAPI spec not found"}), 404
 
+
 # ─── Entrypoint ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Run with debug=False and use_reloader=False to avoid multiple processes in notebooks
     app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
