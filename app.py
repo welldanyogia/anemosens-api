@@ -50,6 +50,10 @@ load_dotenv()
 
 logging.getLogger().setLevel(logging.ERROR)
 
+# Flask app
+app = Flask(__name__)
+CORS(app)
+
 # Model paths
 MODEL_PATH = 'model_anemia_v2.h5'
 
@@ -61,17 +65,50 @@ ANEMIA_THRESHOLD = 12.0
 
 # ─── Model Loading with Compatibility Layer ────────────────────────────────────
 
+def parse_shape_value(val):
+    """
+    Parse shape value that might be stored as string or list.
+    Handles: "[None, 224, 224, 3]", "(None, 224, 224, 3)", [None, 224, 224, 3]
+    """
+    if val is None:
+        return None
+    if isinstance(val, (list, tuple)):
+        return list(val)
+    if isinstance(val, str):
+        # Remove brackets/parens and split
+        val = val.strip().strip('[]()').replace('None', 'null')
+        try:
+            parsed = json.loads(f"[{val}]")
+            return parsed
+        except json.JSONDecodeError:
+            # Fallback: split by comma
+            parts = [p.strip() for p in val.split(',')]
+            result = []
+            for p in parts:
+                if p.lower() == 'none' or p == 'null':
+                    result.append(None)
+                else:
+                    try:
+                        result.append(int(p))
+                    except ValueError:
+                        result.append(p)
+            return result
+    return val
+
+
 def load_model_with_compat(model_path: str):
     """
     Load Keras model with compatibility for older model formats.
-    Handles the batch_shape -> shape migration in InputLayer.
+    Handles batch_shape/shape migration and string-encoded shapes.
     """
     try:
         # First, try standard loading
         return tf.keras.models.load_model(model_path, compile=False)
-    except TypeError as e:
-        if 'batch_shape' not in str(e):
-            raise  # Re-raise if it's a different error
+    except (TypeError, AttributeError) as e:
+        error_str = str(e)
+        # Handle both batch_shape issues and 'str' object has no attribute 'as_list'
+        if 'batch_shape' not in error_str and 'as_list' not in error_str:
+            raise
 
         print(f"   ⚠️  Detected legacy model format, applying compatibility fix...")
 
@@ -81,51 +118,50 @@ def load_model_with_compat(model_path: str):
             if model_config is None:
                 raise ValueError("Model config not found in h5 file")
 
-            # Parse the config
             if isinstance(model_config, bytes):
                 model_config = model_config.decode('utf-8')
             config = json.loads(model_config)
 
-        # Fix layer configs (convert incompatible formats)
         def fix_layer_config(layer_cfg):
             cfg = layer_cfg.get('config', {})
 
-            # Fix InputLayer batch_shape issues
+            # Fix InputLayer shape issues
             if layer_cfg.get('class_name') == 'InputLayer':
-                # Handle batch_shape (old format)
+                # Parse any string-encoded shapes
+                for key in ['batch_shape', 'shape', 'batch_input_shape', 'input_shape']:
+                    if key in cfg:
+                        cfg[key] = parse_shape_value(cfg[key])
+
+                # Normalize to batch_input_shape (most compatible format)
                 if 'batch_shape' in cfg:
                     batch_shape = cfg.pop('batch_shape')
-                    if batch_shape and len(batch_shape) > 1:
+                    if batch_shape:
                         cfg['batch_input_shape'] = batch_shape
 
-                # Remove 'shape' if present (not supported in some versions)
-                if 'shape' in cfg:
+                if 'shape' in cfg and 'batch_input_shape' not in cfg:
                     shape = cfg.pop('shape')
                     if shape:
                         cfg['batch_input_shape'] = [None] + list(shape)
 
-                # Ensure we have batch_input_shape
-                if 'batch_input_shape' not in cfg and 'input_shape' in cfg:
-                    cfg['batch_input_shape'] = [None] + list(cfg.pop('input_shape'))
+                if 'input_shape' in cfg and 'batch_input_shape' not in cfg:
+                    input_shape = cfg.pop('input_shape')
+                    if input_shape:
+                        cfg['batch_input_shape'] = [None] + list(input_shape)
 
-            # Fix DTypePolicy issues across all layers
+            # Fix DTypePolicy issues
             if 'dtype' in cfg:
                 dtype_val = cfg['dtype']
-                # If dtype is a dict with DTypePolicy structure, extract the actual dtype
                 if isinstance(dtype_val, dict):
                     if 'config' in dtype_val and 'name' in dtype_val['config']:
-                        # Extract just the dtype name (e.g., 'float32')
                         cfg['dtype'] = dtype_val['config']['name']
                     elif 'class_name' in dtype_val:
-                        # Fallback: use class_name if no config.name
-                        cfg['dtype'] = 'float32'  # Default to float32
+                        cfg['dtype'] = 'float32'
 
-            # Fix initializers if they have module structure
+            # Fix initializers with module structure
             for key in ['kernel_initializer', 'bias_initializer', 'gamma_initializer',
                        'beta_initializer', 'moving_mean_initializer', 'moving_variance_initializer']:
                 if key in cfg and isinstance(cfg[key], dict):
                     if 'module' in cfg[key]:
-                        # Simplify to just class_name and config
                         cfg[key] = {
                             'class_name': cfg[key].get('class_name', 'GlorotUniform'),
                             'config': cfg[key].get('config', {})
@@ -133,38 +169,40 @@ def load_model_with_compat(model_path: str):
 
             return layer_cfg
 
-        # Process all layers
-        if 'config' in config:
-            if 'layers' in config['config']:
-                for layer in config['config']['layers']:
-                    fix_layer_config(layer)
-            elif isinstance(config['config'], dict):
-                fix_layer_config(config['config'])
+        # Recursively fix all layers including nested functional models
+        def fix_all_layers(cfg_obj):
+            if isinstance(cfg_obj, dict):
+                if 'class_name' in cfg_obj:
+                    fix_layer_config(cfg_obj)
+                if 'config' in cfg_obj and isinstance(cfg_obj['config'], dict):
+                    if 'layers' in cfg_obj['config']:
+                        for layer in cfg_obj['config']['layers']:
+                            fix_all_layers(layer)
+                    else:
+                        fix_layer_config(cfg_obj)
 
-        # Create a temporary patched model file
+        fix_all_layers(config)
+
+        # Create patched model file
         with tempfile.NamedTemporaryFile(delete=False, suffix='.h5') as tmp_file:
             tmp_path = tmp_file.name
 
         try:
-            # Copy original file to temp
             shutil.copy2(model_path, tmp_path)
 
-            # Update the config in the temp file
             with h5py.File(tmp_path, 'r+') as f:
                 f.attrs.modify('model_config', json.dumps(config).encode('utf-8'))
 
-            # Load from the patched temp file
             model = tf.keras.models.load_model(tmp_path, compile=False)
             print(f"   ✅ Legacy model loaded successfully")
             return model
         finally:
-            # Clean up temp file
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
 
 print("🔄 Loading Model V2 (Accurate)...")
-model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+model = load_model_with_compat(MODEL_PATH)
 print(f"   ✅ Model loaded: {MODEL_PATH}")
 
 
