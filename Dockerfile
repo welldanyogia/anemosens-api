@@ -1,5 +1,5 @@
 # Production image
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py model_anemia_v2.keras ./
+COPY app.py model_anemia_v2.h5 ./
 
 EXPOSE 5000
 

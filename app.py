@@ -51,7 +51,7 @@ load_dotenv()
 logging.getLogger().setLevel(logging.ERROR)
 
 # Model paths
-MODEL_PATH = 'model_anemia_v2.keras'
+MODEL_PATH = 'model_anemia_v2.h5'
 
 # Input image size
 IMG_SIZE = (224, 224)
