@@ -5,7 +5,7 @@ This guide covers the initial configuration of a fresh VPS before deploying the 
 ## 1. Initial Access & User Setup
 Login to your fresh VPS as root:
 ```bash
-ssh root@your_server_ip
+ssh root@103.23.199.172
 ```
 
 Create a new sudouser (replace `anemo` with your preferred username):
@@ -20,7 +20,7 @@ usermod -aG sudo anemo
 ### SSH Hardening
 Copy your local SSH key to the new user (run this **from your local machine**, not the VPS):
 ```bash
-ssh-copy-id anemo@your_server_ip
+ssh-copy-id anemo@103.23.199.172
 ```
 
 Back on the VPS, disable root login and password authentication:
@@ -40,7 +40,7 @@ sudo systemctl restart ssh
 ### Firewall (UFW)
 Allow SSH, HTTP, and HTTPS:
 ```bash
-sudo ufw allow OpenSSH
+    sudo ufw allow OpenSSH
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw enable

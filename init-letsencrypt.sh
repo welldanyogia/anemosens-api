@@ -8,7 +8,7 @@ fi
 domains=(anemosense.webrana.id)
 rsa_key_size=4096
 data_path="./data/certbot"
-email="your-email@example.com" # Change this to your email
+email="welldanyogia01@gmail.com" # Change this to your email
 staging=0 # Set to 1 if you're testing your setup to avoid hitting request limits
 
 if [ -d "$data_path" ]; then
