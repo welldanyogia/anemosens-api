@@ -39,7 +39,7 @@
    - Update `/path/to/anemosens-api` in the deploy script to the actual path on your server.
 
 4. Daily Operations
-- The application will automatically restart on push to `master` branch.
+- The application will automatically restart on push to `main` branch.
 - SSL certificates will auto-renew.
 
 ## Troubleshooting
