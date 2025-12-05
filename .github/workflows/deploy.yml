@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_IMAGE: your-dockerhub-username/anemosense-api
+  DOCKER_IMAGE: welldanyogia/anemosense-api
 
 jobs:
   build:
@@ -42,7 +42,7 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd /path/to/anemosens-api
+            cd /home/anemo/anemosens-api/anemosens-api
             git pull
             
             # Pull latest image
