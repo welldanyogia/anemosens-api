@@ -38,6 +38,37 @@
    - Replace `your-dockerhub-username` with your actual username.
    - Update `/path/to/anemosens-api` in the deploy script to the actual path on your server.
 
-## Daily Operations
-- The application will automatically restart on push to `main` branch.
+4. Daily Operations
+- The application will automatically restart on push to `master` branch.
 - SSL certificates will auto-renew.
+
+## Troubleshooting
+
+### Docker Permission Denied
+If you see `PermissionError` or `connection aborted` when running scripts:
+1. Ensure your user is in the docker group:
+   ```bash
+   sudo usermod -aG docker $USER
+   ```
+2. **Refresh your session** (this is critical):
+   ```bash
+   newgrp docker
+   ```
+3. Retry the command.
+
+### Docker Connection Refused
+If you see `ConnectionRefusedError` or `Is the docker daemon running?`:
+1. Check if Docker is running:
+   ```bash
+   sudo systemctl status docker
+   ```
+2. Start the service if it's stopped:
+   ```bash
+   sudo systemctl start docker
+   sudo systemctl enable docker
+   ```
+3. Verify it works:
+   ```bash
+   docker ps
+   ```
+
