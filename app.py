@@ -55,7 +55,7 @@ app = Flask(__name__)
 CORS(app)
 
 # Model paths
-MODEL_PATH = 'model_anemia_v2.h5'
+MODEL_PATH = 'model_anemia_v2.keras'
 
 # Input image size
 IMG_SIZE = (224, 224)
@@ -202,7 +202,12 @@ def load_model_with_compat(model_path: str):
 
 
 print("🔄 Loading Model V2 (Accurate)...")
-model = load_model_with_compat(MODEL_PATH)
+if MODEL_PATH.endswith('.keras'):
+    # .keras format - native TF2 format, load directly
+    model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+else:
+    # .h5 format - may need compatibility fixes
+    model = load_model_with_compat(MODEL_PATH)
 print(f"   ✅ Model loaded: {MODEL_PATH}")
 
 
