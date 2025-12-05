@@ -51,7 +51,7 @@ load_dotenv()
 logging.getLogger().setLevel(logging.ERROR)
 
 # Model paths
-MODEL_PATH = 'model_anemia_v2.h5'
+MODEL_PATH = 'model_anemia_v2.keras'
 
 # Input image size
 IMG_SIZE = (224, 224)
@@ -164,7 +164,7 @@ def load_model_with_compat(model_path: str):
 
 
 print("🔄 Loading Model V2 (Accurate)...")
-model = load_model_with_compat(MODEL_PATH)
+model = tf.keras.models.load_model(MODEL_PATH, compile=False)
 print(f"   ✅ Model loaded: {MODEL_PATH}")
 
 
