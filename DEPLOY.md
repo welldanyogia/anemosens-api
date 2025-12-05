@@ -14,7 +14,13 @@
    ```bash
    chmod +x init-letsencrypt.sh
    ```
-4. Run the initialization script to generate SSL certificates:
+4. Create `.env` file from example:
+   ```bash
+   cp .env.example .env
+   nano .env
+   # Edit any values if necessary (e.g., SECRET_KEY)
+   ```
+5. Run the initialization script to generate SSL certificates:
    ```bash
    ./init-letsencrypt.sh
    ```
