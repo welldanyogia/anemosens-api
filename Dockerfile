@@ -17,4 +17,4 @@ EXPOSE 5000
 # --threads 2  : 2 threads per worker (untuk I/O blocking saat upload)
 # --timeout 120: 120 detik timeout (ML inference bisa lama)
 # -b 0.0.0.0   : Bind ke semua interfaces
-CMD ["gunicorn", "-w", "4", "--threads", "2", "--timeout", "120", "-b", "0.0.0.0:5000", "app:app"]
+CMD ["gunicorn", "-w", "2", "--threads", "2", "--timeout", "120", "-b", "0.0.0.0:5000", "app:app"]
