@@ -50,6 +50,10 @@ load_dotenv()
 
 logging.getLogger().setLevel(logging.ERROR)
 
+# Flask app
+app = Flask(__name__)
+CORS(app)
+
 # Model paths
 MODEL_PATH = 'model_anemia_v2.keras'
 
