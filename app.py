@@ -3,7 +3,7 @@
 app.py — Flask service for anemia prediction.
 
 Model:
-- Model V2 (model_anemia_v2.h5): Single accurate model with internal normalization.
+- Model V2 (model_anemia_v2.keras): Single accurate model with internal normalization.
 
 Inputs:
 - Input 1: Image (224, 224, 3)
@@ -51,7 +51,7 @@ load_dotenv()
 logging.getLogger().setLevel(logging.ERROR)
 
 # Model paths
-MODEL_PATH = 'model_anemia_v2.h5'
+MODEL_PATH = 'model_anemia_v2.keras'
 
 # Input image size
 IMG_SIZE = (224, 224)

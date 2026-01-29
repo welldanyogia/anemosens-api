@@ -1,5 +1,5 @@
 # Production image
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -8,12 +8,12 @@ ENV PYTHONUNBUFFERED=1
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py anemia_model_v1.h5 model_anemia_v2.h5 ./
+COPY app.py model_anemia_v2.keras ./
 
 EXPOSE 5000
 
 # Gunicorn Production Configuration:
-# -w 4         : 4 workers (formula: 2 * vCPU + 1, asumsi 2 vCPU)
+# -w 2         : 2 workers (optimized for 2 vCPU + limited RAM)
 # --threads 2  : 2 threads per worker (untuk I/O blocking saat upload)
 # --timeout 120: 120 detik timeout (ML inference bisa lama)
 # -b 0.0.0.0   : Bind ke semua interfaces
