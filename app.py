@@ -7,7 +7,7 @@ Model:
 
 Inputs:
 - Input 1: Image (224, 224, 3)
-- Input 2: Metadata [gender_code, age]
+- Input 2: Metadata [age, gender_code]
 """
 
 # ─── Debugpy / Colab repr hack ──────────────────────────────────────────────────
@@ -325,8 +325,8 @@ def predict():
         img_batch = preprocess_for_model(img_rgb)
         
         # Metadata batch
-        # Format: [gender_code, age] based on training
-        meta_batch = np.array([[gender_code, age]], dtype=np.float32)
+        # Format: [age, gender_code] based on training (Anemia_Fiks.ipynb)
+        meta_batch = np.array([[age, gender_code]], dtype=np.float32)
 
         # ─── Run Prediction ────────────────────────────────────────────────
         try:
