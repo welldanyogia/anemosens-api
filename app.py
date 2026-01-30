@@ -40,7 +40,7 @@ import numpy as np
 import cv2
 import tensorflow as tf
 
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from tensorflow.keras.applications.efficientnet import preprocess_input as efficientnet_preprocess
 from dotenv import load_dotenv
@@ -468,30 +468,6 @@ def openapi_spec():
             return f.read(), 200, {'Content-Type': 'text/yaml'}
     except FileNotFoundError:
         return jsonify({"error": "OpenAPI spec not found"}), 404
-
-
-# ─── APK Download Endpoint ─────────────────────────────────────────────────────
-APK_URL_FILE = '/tmp/apk_url.txt'
-
-@app.route('/webhook/apk', methods=['POST'])
-def webhook_apk():
-    """Receive APK artifact URL from GitLab CI."""
-    data = request.get_json()
-    if data and 'artifact_url' in data:
-        with open(APK_URL_FILE, 'w') as f:
-            f.write(data['artifact_url'])
-        return jsonify({"status": "ok"}), 200
-    return jsonify({"error": "Missing artifact_url"}), 400
-
-@app.route('/download', methods=['GET'])
-def download_apk():
-    """Redirect to latest APK artifact."""
-    if os.path.exists(APK_URL_FILE):
-        with open(APK_URL_FILE, 'r') as f:
-            url = f.read().strip()
-        if url:
-            return jsonify({"download_url": url}), 200
-    return jsonify({"error": "APK not available yet"}), 404
 
 
 # ─── Entrypoint ────────────────────────────────────────────────────────────────
