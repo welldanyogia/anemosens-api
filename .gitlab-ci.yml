@@ -31,11 +31,12 @@ deploy:
     - chmod 700 ~/.ssh
   script:
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
+        mkdir -p /var/www/anemosense &&
         docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY &&
         docker pull $IMAGE_NAME:latest &&
         docker stop anemosense_api || true &&
         docker rm anemosense_api || true &&
-        docker run -d --name anemosense_api --restart unless-stopped -p 127.0.0.1:5000:5000 $IMAGE_NAME:latest
+        docker run -d --name anemosense_api --restart unless-stopped -p 127.0.0.1:5000:5000 -v /var/www/anemosense:/var/www/anemosense $IMAGE_NAME:latest
       "
   only:
     - main

@@ -40,7 +40,7 @@ import numpy as np
 import cv2
 import tensorflow as tf
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from tensorflow.keras.applications.efficientnet import preprocess_input as efficientnet_preprocess
 from dotenv import load_dotenv
@@ -468,6 +468,17 @@ def openapi_spec():
             return f.read(), 200, {'Content-Type': 'text/yaml'}
     except FileNotFoundError:
         return jsonify({"error": "OpenAPI spec not found"}), 404
+
+
+# ─── APK Download Endpoint ─────────────────────────────────────────────────────
+APK_PATH = '/var/www/anemosense/anemosense.apk'
+
+@app.route('/download', methods=['GET'])
+def download_apk():
+    """Download latest APK."""
+    if os.path.exists(APK_PATH):
+        return send_file(APK_PATH, as_attachment=True, download_name='anemosense.apk')
+    return jsonify({"error": "APK not found"}), 404
 
 
 # ─── Entrypoint ────────────────────────────────────────────────────────────────
