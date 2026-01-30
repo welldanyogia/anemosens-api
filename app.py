@@ -471,14 +471,27 @@ def openapi_spec():
 
 
 # ─── APK Download Endpoint ─────────────────────────────────────────────────────
-APK_PATH = '/var/www/anemosense/anemosense.apk'
+APK_URL_FILE = '/tmp/apk_url.txt'
+
+@app.route('/webhook/apk', methods=['POST'])
+def webhook_apk():
+    """Receive APK artifact URL from GitLab CI."""
+    data = request.get_json()
+    if data and 'artifact_url' in data:
+        with open(APK_URL_FILE, 'w') as f:
+            f.write(data['artifact_url'])
+        return jsonify({"status": "ok"}), 200
+    return jsonify({"error": "Missing artifact_url"}), 400
 
 @app.route('/download', methods=['GET'])
 def download_apk():
-    """Download latest APK."""
-    if os.path.exists(APK_PATH):
-        return send_file(APK_PATH, as_attachment=True, download_name='anemosense.apk')
-    return jsonify({"error": "APK not found"}), 404
+    """Redirect to latest APK artifact."""
+    if os.path.exists(APK_URL_FILE):
+        with open(APK_URL_FILE, 'r') as f:
+            url = f.read().strip()
+        if url:
+            return jsonify({"download_url": url}), 200
+    return jsonify({"error": "APK not available yet"}), 404
 
 
 # ─── Entrypoint ────────────────────────────────────────────────────────────────
