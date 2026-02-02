@@ -183,7 +183,7 @@ def validate_age(age_value) -> tuple:
         return None, "Invalid age"
 
 
-def validate_file_size(file_obj, max_size_mb=5) -> bool:
+def validate_file_size(file_obj, max_size_mb=10) -> bool:
     """Check if file size is within the allowed limit."""
     file_obj.seek(0, os.SEEK_END)
     size_bytes = file_obj.tell()
@@ -281,7 +281,7 @@ def predict():
             if not img_file.mimetype or not img_file.mimetype.startswith('image/'):
                 return jsonify({"error": "Invalid file type"}), 400
 
-            if not validate_file_size(img_file, max_size_mb=5):
+            if not validate_file_size(img_file, max_size_mb=10):
                 return jsonify({"error": "File too large"}), 413
 
             img_bytes = img_file.read()
